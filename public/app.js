@@ -1,4 +1,4 @@
-// latamacc.si — mapa de Latam en llamas + registros en vivo por WebSocket.
+// latamacc.si — mapa de Latam en oro (golden era) + directorio en vivo por WebSocket.
 
 const $ = s => document.querySelector(s);
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -41,14 +41,15 @@ function sprite(stops, size = 64) {
   g.fillStyle = grd; g.fillRect(0, 0, size, size);
   return c;
 }
+// paleta dorada: champán → oro → bronce
 const SPR = [
-  sprite([[0, "rgba(255,255,235,1)"], [0.25, "rgba(255,230,140,.9)"], [1, "rgba(255,150,30,0)"]]),
-  sprite([[0, "rgba(255,220,120,1)"], [0.3, "rgba(255,150,40,.8)"], [1, "rgba(255,80,0,0)"]]),
-  sprite([[0, "rgba(255,140,40,.9)"], [0.4, "rgba(230,60,10,.6)"], [1, "rgba(160,20,0,0)"]]),
-  sprite([[0, "rgba(140,40,10,.5)"], [1, "rgba(40,10,0,0)"]]),
+  sprite([[0, "rgba(255,253,240,1)"], [0.25, "rgba(255,240,190,.9)"], [1, "rgba(240,200,110,0)"]]),
+  sprite([[0, "rgba(255,236,170,1)"], [0.3, "rgba(240,198,92,.8)"], [1, "rgba(212,160,40,0)"]]),
+  sprite([[0, "rgba(232,190,90,.9)"], [0.4, "rgba(190,140,40,.55)"], [1, "rgba(130,90,20,0)"]]),
+  sprite([[0, "rgba(120,88,30,.45)"], [1, "rgba(40,28,8,0)"]]),
 ];
-const BEACON = sprite([[0, "rgba(255,255,255,1)"], [0.12, "rgba(255,255,255,1)"], [0.3, "rgba(255,244,214,.65)"], [0.6, "rgba(255,210,150,.18)"], [1, "rgba(255,200,120,0)"]], 128);
-const GLOW = sprite([[0, "rgba(255,255,255,1)"], [0.15, "rgba(255,220,130,.95)"], [0.4, "rgba(255,130,30,.35)"], [1, "rgba(255,80,0,0)"]], 128);
+const BEACON = sprite([[0, "rgba(255,255,255,1)"], [0.12, "rgba(255,255,255,1)"], [0.3, "rgba(255,246,214,.7)"], [0.6, "rgba(245,215,140,.2)"], [1, "rgba(240,200,110,0)"]], 128);
+const GLOW = sprite([[0, "rgba(255,255,255,1)"], [0.15, "rgba(255,238,180,.95)"], [0.4, "rgba(230,190,90,.35)"], [1, "rgba(200,150,40,0)"]], 128);
 
 // ---------- geometría del mapa ----------
 let landPath, mask, maskW, maskH, maskScale = 0.4, ember, maskCtx;
@@ -103,7 +104,7 @@ function buildGeometry() {
   ember.width = Math.ceil(w * 0.5); ember.height = Math.ceil(h * 0.5);
   const e = ember.getContext("2d");
   e.setTransform(0.5, 0, 0, 0.5, 0, 0);
-  e.fillStyle = "#2b0b03"; e.fill(landPath);
+  e.fillStyle = "#1f1606"; e.fill(landPath);
   e.save(); e.clip(landPath);
   e.globalCompositeOperation = "lighter";
   for (let i = 0; i < 2600; i++) {
@@ -208,18 +209,18 @@ function frame() {
   ctx.globalAlpha = 0.75 + Math.sin(now * 3) * 0.08 + Math.sin(now * 7.3) * 0.04;
   ctx.drawImage(ember, 0, 0, w, h);
   ctx.globalAlpha = 1;
-  ctx.shadowColor = "rgba(255,110,20,.9)"; ctx.shadowBlur = 14 * k * dpr;
-  ctx.lineWidth = 1.6 / k; ctx.strokeStyle = `rgba(255,${150 + Math.sin(now * 5) * 30 | 0},50,.95)`;
+  ctx.shadowColor = "rgba(240,196,90,.9)"; ctx.shadowBlur = 14 * k * dpr;
+  ctx.lineWidth = 1.6 / k; ctx.strokeStyle = `rgba(255,${222 + Math.sin(now * 4) * 14 | 0},${150 + Math.sin(now * 3) * 30 | 0},.95)`;
   ctx.stroke(landPath);
   ctx.restore();
 
-  // país resaltado (hover o chip del tweet)
+  // país resaltado (hover o chip del directorio)
   const hi = flash && now - flash.t < 2.2 ? flash.c : mouse.country;
   if (hi >= 0) {
     const c = S.countries[hi];
     ctx.save();
-    ctx.fillStyle = "rgba(255,130,30,.22)"; ctx.fill(c.path);
-    ctx.shadowColor = "#ffcf70"; ctx.shadowBlur = 18 * k * dpr;
+    ctx.fillStyle = "rgba(245,200,100,.2)"; ctx.fill(c.path);
+    ctx.shadowColor = "#ffe3a0"; ctx.shadowBlur = 18 * k * dpr;
     ctx.lineWidth = 2.4 / k; ctx.strokeStyle = "#fff1c9"; ctx.stroke(c.path);
     ctx.restore();
   }
@@ -290,19 +291,19 @@ function frame() {
     if (e.kind === "ring") {
       ctx.globalAlpha = (1 - a) * 0.9;
       ctx.lineWidth = (3 * (1 - a) + 0.5) / k;
-      ctx.strokeStyle = "#ffcf70";
+      ctx.strokeStyle = "#ffe2a0";
       ctx.beginPath(); ctx.arc(e.x, e.y, e.r * easeOut(a), 0, Math.PI * 2); ctx.stroke();
     } else if (e.kind === "arc") {
       const mx = (e.x + e.x2) / 2, my = Math.min(e.y, e.y2) - Math.hypot(e.x2 - e.x, e.y2 - e.y) * 0.35;
       ctx.globalAlpha = (1 - a) * 0.55;
-      ctx.lineWidth = 1.2 / k; ctx.strokeStyle = "#ffd28a";
+      ctx.lineWidth = 1.2 / k; ctx.strokeStyle = "#f3d58c";
       ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.quadraticCurveTo(mx, my, e.x2, e.y2); ctx.stroke();
       const t = Math.min(1, a * 1.8), u = 1 - t;
       const bx = u * u * e.x + 2 * u * t * mx + t * t * e.x2, by = u * u * e.y + 2 * u * t * my + t * t * e.y2;
       ctx.globalAlpha = 1 - a; ctx.drawImage(GLOW, bx - 14, by - 14, 28, 28);
     } else if (e.kind === "beam") {
       const g = ctx.createLinearGradient(e.x, e.y, e.x, e.y - 420);
-      g.addColorStop(0, `rgba(255,220,140,${(1 - a) * 0.9})`); g.addColorStop(1, "rgba(255,120,30,0)");
+      g.addColorStop(0, `rgba(255,236,180,${(1 - a) * 0.9})`); g.addColorStop(1, "rgba(220,170,60,0)");
       ctx.globalAlpha = 1; ctx.fillStyle = g;
       const bw = 6 * (1 - a) + 1;
       ctx.fillRect(e.x - bw / 2, e.y - 420, bw, 420);
@@ -320,8 +321,8 @@ function frame() {
     ctx.globalAlpha = a < 0.1 ? a * 10 : a > 0.75 ? (1 - a) * 4 : 1;
     ctx.font = "600 14px Inter, sans-serif"; ctx.textAlign = "center";
     const tw = ctx.measureText(e.text).width + 20;
-    ctx.fillStyle = "rgba(14,9,6,.88)"; roundRect(sx - tw / 2, sy - 18, tw, 26, 13); ctx.fill();
-    ctx.strokeStyle = "rgba(255,160,60,.7)"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = "rgba(12,10,6,.9)"; roundRect(sx - tw / 2, sy - 18, tw, 26, 13); ctx.fill();
+    ctx.strokeStyle = "rgba(240,200,110,.75)"; ctx.lineWidth = 1; ctx.stroke();
     ctx.fillStyle = "#fff4dc"; ctx.fillText(e.text, sx, sy);
   }
   ctx.globalAlpha = 1;
@@ -344,7 +345,7 @@ canvas.addEventListener("pointermove", e => {
   if (c) {
     const n = S.byCountry[c.code] || 0;
     const w = S.watching[c.code] || 0;
-    tip.innerHTML = `<b>${flag(c.code)} ${esc(c.es)}</b><span>🔥 ${n} builder${n === 1 ? "" : "s"}${w ? ` · 👀 ${w} mirando ahora` : ""}</span><span>clic = chispa para todos</span>`;
+    tip.innerHTML = `<b>${flag(c.code)} ${esc(c.en)}</b><span>✦ ${n} in the directory${w ? ` · 👀 ${w} watching now` : ""}</span><span>click to send a spark · double-click to browse</span>`;
     tip.style.left = m.x + "px"; tip.style.top = m.y + "px"; tip.hidden = false;
   } else tip.hidden = true;
 });
@@ -355,6 +356,7 @@ canvas.addEventListener("click", e => {
   flare(m.mx, m.my, null, false);
   sendSpark(m.mx / S.map.w, m.my / S.map.h);
   if (c >= 0) { const sel = $("#country"); if (!sel.value) sel.value = S.countries[c].code; }
+  if (c >= 0 && e.detail === 2) filterCountry(S.countries[c].code);
 });
 
 // ---------- WebSocket ----------
@@ -389,125 +391,136 @@ function onJoin(b, total) {
   }
   ticker(b);
   renderStats(); renderFeed(true); renderBoard(); renderChips();
+  if (matchesFilter(b)) { dir.entries.unshift(b); renderDir(); }
 }
 
 // ---------- UI ----------
+const cname = cc => S.byCode[cc]?.en || cc;
 function countUp(el, to) {
   const from = Number(el.dataset.v || 0); el.dataset.v = to;
-  if (reduced) { el.textContent = to.toLocaleString("es"); return; }
+  if (reduced) { el.textContent = to.toLocaleString("en"); return; }
   const t0 = performance.now();
-  const step = () => { const a = Math.min(1, (performance.now() - t0) / 900); el.textContent = Math.round(from + (to - from) * easeOut(a)).toLocaleString("es"); if (a < 1) requestAnimationFrame(step); };
+  const step = () => { const a = Math.min(1, (performance.now() - t0) / 900); el.textContent = Math.round(from + (to - from) * easeOut(a)).toLocaleString("en"); if (a < 1) requestAnimationFrame(step); };
   step();
 }
 function renderStats() {
   countUp($("#total"), S.total);
   countUp($("#countries-lit"), Object.values(S.byCountry).filter(n => n > 0).length);
 }
-const ago = ts => { const s = (Date.now() - ts) / 1000; return s < 60 ? "ahora" : s < 3600 ? `hace ${s / 60 | 0} min` : s < 86400 ? `hace ${s / 3600 | 0} h` : `hace ${s / 86400 | 0} d`; };
+const ago = ts => { const s = (Date.now() - ts) / 1000; return s < 60 ? "just now" : s < 3600 ? `${s / 60 | 0} min ago` : s < 86400 ? `${s / 3600 | 0} h ago` : `${s / 86400 | 0} d ago`; };
+const safeUrl = u => /^https?:\/\//i.test(u || "") ? u : "";
+const host = u => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
+const subtitle = b => b.kind === "company" ? "Company" : b.company ? `@ ${b.company}` : "";
+
 function renderFeed(isNew) {
   const ol = $("#feed");
-  if (!S.recent.length) { ol.innerHTML = `<li class="empty">Nadie todavía. Sé el primero en encender Latam 🔥</li>`; return; }
-  ol.innerHTML = S.recent.map((b, i) => `<li class="${isNew && i === 0 ? "new" : ""}"><span class="flag">${flag(b.country)}</span><div><b>${esc(b.name)}</b>${b.n ? ` <small class="mono">#${b.n}</small>` : ""}${b.handle ? ` <a href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener">@${esc(b.handle)}</a>` : ""}<em>${esc([b.city, S.byCode[b.country]?.es].filter(Boolean).join(", "))} · ${ago(b.ts)}</em>${b.building ? `<em>⚡ ${esc(b.building)}</em>` : ""}</div></li>`).join("");
+  if (!S.recent.length) { ol.innerHTML = `<li class="empty">No one yet. Be the first to light up Latam ✦</li>`; return; }
+  ol.innerHTML = S.recent.map((b, i) => `<li class="${isNew && i === 0 ? "new" : ""}"><span class="flag">${flag(b.country)}</span><div><b>${esc(b.name)}</b>${b.n ? ` <small class="mono">#${b.n}</small>` : ""}${subtitle(b) ? ` <em class="inline">${esc(subtitle(b))}</em>` : ""}<em>${esc([b.city, cname(b.country)].filter(Boolean).join(", "))} · ${ago(b.ts)}</em>${b.building ? `<em>✦ ${esc(b.building)}</em>` : ""}</div></li>`).join("");
 }
 function renderBoard() {
   const rows = Object.entries(S.byCountry).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(0, 8);
   const max = rows[0]?.[1] || 1;
-  $("#board").innerHTML = rows.length ? rows.map(([cc, n]) => `<li><span>${flag(cc)}</span><div class="bar"><i style="width:${(n / max) * 100}%"></i></div><b>${n}</b></li>`).join("") : `<li class="empty" style="display:block;color:var(--mute)">Aún sin países encendidos.</li>`;
+  $("#board").innerHTML = rows.length ? rows.map(([cc, n]) => `<li title="${esc(cname(cc))}"><span>${flag(cc)}</span><div class="bar"><i style="width:${(n / max) * 100}%"></i></div><b>${n}</b></li>`).join("") : `<li class="empty" style="display:block;color:var(--mute)">No countries lit yet.</li>`;
 }
 function ticker(b) {
   const ol = $("#ticker");
   const li = document.createElement("li");
-  li.innerHTML = `🔥 <b>${esc(b.name)}</b> se encendió en ${flag(b.country)} ${esc(b.city || S.byCode[b.country]?.es || "")}${b.building ? ` <em>· ${esc(b.building)}</em>` : ""}`;
+  li.innerHTML = `✦ <b>${esc(b.name)}</b> joined from ${flag(b.country)} ${esc(b.city || cname(b.country))}${b.building ? ` <em>· ${esc(b.building)}</em>` : ""}`;
   ol.prepend(li);
   while (ol.children.length > 4) ol.lastChild.remove();
   setTimeout(() => { li.classList.add("out"); setTimeout(() => li.remove(), 700); }, 7000);
 }
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(t._h); t._h = setTimeout(() => (t.hidden = true), 4500); }
 
-// ---------- tweet de César ----------
-const TWEET_EN = [
-  "Gained 1000 new followers and 1 million views in the past days",
-  "Trillions of dollars will be unlocked in this region, this post has been liked by builders from all Latam nationalities, we all speak Spanish and Portuguese is quite similar, we all share the same culture, we all been undervalued by the global market, we have been the underdogs for a long time, but here we have a whole new generation of makers, people that use more and more ai, minimum $1000 dollars per month, others are spending $20.000 per month, the acceleration is here, and people are using it to make things faster and better and come up with way more ideias that we ever came in our life, creativity golden era",
-  "This truly is a whole new generation of makers that don’t complain that the labs and the platforms are moving too fast, that they are moving faster that consumers are able to use all the new stuff, NO!!! this Latam crowd doesn’t complain, we accelerate and we learn to be FAST",
-  "This is Latam/acc, and we are making noise! Our brothers from North America are watching and getting ready to deploy real capital to scale whatever good stuff you cook",
-  "Cheers to my hermanos y hermanas from all these countries, we are just getting started",
-];
-const TWEET_ES = [
-  "Gané 1.000 seguidores nuevos y 1 millón de vistas en los últimos días",
-  "Billones de dólares se van a desbloquear en esta región. A este post le dieron like builders de todas las nacionalidades de Latam: todos hablamos español y el portugués es muy parecido, compartimos la misma cultura y el mercado global nos ha subvalorado. Fuimos los underdogs por mucho tiempo, pero aquí hay una generación completamente nueva de makers, gente que usa cada vez más IA, mínimo US$1.000 al mes, otros gastan US$20.000 al mes. La aceleración llegó y la gente la usa para hacer cosas más rápido y mejor, y para tener muchas más ideas que nunca. La era dorada de la creatividad.",
-  "Es una generación de makers que no se queja de que los labs y las plataformas avancen demasiado rápido, más rápido de lo que los consumidores alcanzan a usar todo lo nuevo. ¡NO! Esta gente de Latam no se queja: aceleramos y aprendemos a ser RÁPIDOS.",
-  "Esto es Latam/acc, ¡y estamos haciendo ruido! Nuestros hermanos de Norteamérica están mirando y alistándose para desplegar capital real para escalar lo bueno que cocines.",
-  "Salud a mis hermanos y hermanas de todos estos países, apenas estamos empezando.",
-];
-const HOT = /^(latam\/acc|acceleration|accelerate|aceleración|aceleramos|fast|rápidos|makers|creativity|creatividad|golden|dorada|trillions|billones|noise|ruido|capital)[,.!]*$/i;
-const TWEET_COUNTRIES = ["MX", "BZ", "CR", "SV", "GT", "HN", "NI", "PA", "AR", "BO", "BR", "CL", "CO", "EC", "GY", "PY", "PE", "SR", "UY", "VE", "CU", "DO", "PR", "HT"];
-let tweetLang = "en", typing = null, tweetShown = false;
+// ---------- directorio ----------
+const dir = { entries: [], q: "", kind: "", country: "" };
+const matchesFilter = b => (!dir.kind || b.kind === dir.kind) && (!dir.country || b.country === dir.country) &&
+  (!dir.q || [b.name, b.company, b.building, b.city].join(" ").toLowerCase().includes(dir.q.toLowerCase()));
 
-function renderTweet(animate) {
-  const body = $("#tweet-body");
-  const paras = tweetLang === "en" ? TWEET_EN : TWEET_ES;
-  body.innerHTML = paras.map(p => `<p>${p.split(/\s+/).map(w => `<span class="w${HOT.test(w) ? " hot" : ""}">${esc(w)}</span>`).join(" ")}</p>`).join("");
-  const words = [...body.querySelectorAll(".w")];
-  clearInterval(typing);
-  if (!animate || reduced) { words.forEach(w => w.classList.add("on")); return; }
-  let i = 0;
-  typing = setInterval(() => { for (let k = 0; k < 3 && i < words.length; k++) words[i++].classList.add("on"); if (i >= words.length) clearInterval(typing); }, 28);
-}
 function renderChips() {
-  $("#tweet-countries").innerHTML = TWEET_COUNTRIES.map(cc => {
-    const c = S.byCode[cc]; const n = S.byCountry[cc] || 0;
-    return `<li data-cc="${cc}" class="${n ? "lit" : ""}">${flag(cc)} ${esc(tweetLang === "en" ? c?.en : c?.es)}${n ? ` <small>${n}</small>` : ""}</li>`;
+  const codes = S.countries.filter(c => !c.deco).map(c => c.code).sort((a, b) => (S.byCountry[b] || 0) - (S.byCountry[a] || 0) || cname(a).localeCompare(cname(b)));
+  $("#country-chips").innerHTML = [`<li data-cc="" class="${dir.country ? "" : "on"}">All countries</li>`]
+    .concat(codes.map(cc => { const n = S.byCountry[cc] || 0; return `<li data-cc="${cc}" class="${n ? "lit" : ""} ${dir.country === cc ? "on" : ""}">${flag(cc)} ${esc(cname(cc))}${n ? ` <small>${n}</small>` : ""}</li>`; })).join("");
+}
+function renderDir() {
+  const ul = $("#dir");
+  if (!dir.entries.length) {
+    ul.innerHTML = `<li class="empty">${dir.q || dir.kind || dir.country ? "No matches yet." : "The directory is waiting for its first members."} <a href="#join">Join the directory</a></li>`;
+    return;
+  }
+  ul.innerHTML = dir.entries.map(b => {
+    const site = safeUrl(b.website);
+    return `<li class="card">
+      <div class="card-top"><span class="flag">${flag(b.country)}</span><span class="badge ${b.kind}">${b.kind === "company" ? "Company" : "Person"}</span><small class="mono">#${b.n}</small></div>
+      <b>${esc(b.name)}</b>${b.kind === "person" && b.company ? `<span class="co">${esc(b.company)}</span>` : ""}
+      ${b.building ? `<p>${esc(b.building)}</p>` : ""}
+      <div class="card-foot"><span>${esc([b.city, cname(b.country)].filter(Boolean).join(", "))}</span>
+        <span class="links">${site ? `<a href="${esc(site)}" target="_blank" rel="noopener nofollow">${esc(host(site))} ↗</a>` : ""}${b.handle ? `<a href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow">𝕏</a>` : ""}</span></div>
+    </li>`;
   }).join("");
 }
-$("#tweet-countries").addEventListener("click", e => {
+let dirTimer;
+async function loadDir() {
+  const qs = new URLSearchParams({ q: dir.q, kind: dir.kind, country: dir.country });
+  try { dir.entries = (await fetch("/api/directory?" + qs).then(r => r.json())).entries || []; } catch { dir.entries = []; }
+  renderDir();
+}
+function filterCountry(cc) {
+  dir.country = cc; renderChips(); loadDir();
+  if (cc) document.getElementById("directory").scrollIntoView({ behavior: "smooth" });
+}
+$("#q").addEventListener("input", e => { dir.q = e.target.value.trim(); clearTimeout(dirTimer); dirTimer = setTimeout(loadDir, 200); });
+document.querySelectorAll('input[name="fkind"]').forEach(r => r.addEventListener("change", e => { dir.kind = e.target.value; loadDir(); }));
+$("#country-chips").addEventListener("click", e => {
   const li = e.target.closest("li"); if (!li) return;
-  const c = S.byCode[li.dataset.cc]; if (!c) return;
-  $("#country").value = c.code;
-  window.scrollTo({ top: 0, behavior: "smooth" });
-  setTimeout(() => {
-    flash = { c: c.index, t: performance.now() / 1000 };
-    const s = c.samples?.[0]; if (s) { const m = c.centroid; flare(m[0], m[1], `${flag(c.code)} ${c.es}`, false); }
-  }, 500);
-});
-$("#translate").addEventListener("click", () => {
-  tweetLang = tweetLang === "en" ? "es" : "en";
-  $("#translate").textContent = tweetLang === "en" ? "Traducir al español" : "Ver original";
-  renderTweet(false); renderChips();
+  const cc = li.dataset.cc;
+  dir.country = cc; renderChips(); loadDir();
+  const c = S.byCode[cc];
+  if (c) flash = { c: c.index, t: performance.now() / 1000 };
 });
 
 // ---------- formulario ----------
 const form = $("#form");
+function syncKind() {
+  const company = form.kind.value === "company";
+  $("#name-label").textContent = company ? "Company name" : "Full name";
+  form.name.placeholder = company ? "Acme AI" : "Ana Pérez";
+  form.name.autocomplete = company ? "organization" : "name";
+  $("#building-label").textContent = company ? "What does the company build?" : "What are you building?";
+  form.querySelector(".person-only").hidden = company;
+}
+form.querySelectorAll('input[name="kind"]').forEach(r => r.addEventListener("change", syncKind));
+
 form.addEventListener("submit", async e => {
   e.preventDefault();
   const msg = $("#form-msg"), btn = $("#submit");
   const data = Object.fromEntries(new FormData(form));
   msg.className = "form-msg"; msg.textContent = "";
-  if (!data.name.trim() || !data.email.includes("@") || !data.country) { msg.className = "form-msg err"; msg.textContent = "Completa nombre, correo y país."; return; }
-  btn.disabled = true; btn.textContent = "Encendiendo…";
+  if (!data.name.trim() || !data.email.includes("@") || !data.country) { msg.className = "form-msg err"; msg.textContent = "Please add a name, email and country."; return; }
+  btn.disabled = true; btn.textContent = "Joining…";
   try {
     const r = await fetch("/api/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
     const j = await r.json();
-    if (!r.ok) throw new Error(j.error || "No se pudo registrar.");
+    if (!r.ok) throw new Error(j.error || "Could not register.");
     showDone(j.builder, j.existing);
     if (j.existing) return;
-    form.reset();
+    form.reset(); syncKind();
     window.scrollTo({ top: 0, behavior: "smooth" });
     // si el socket no llegó, se pinta localmente
     setTimeout(() => onJoin(j.builder), 700);
-    toast(`🔥 ${j.builder.name}, ya estás en el mapa de Latam/acc`);
+    toast(`✦ ${j.builder.name} is now on the Latam/acc map`);
   } catch (err) {
     msg.className = "form-msg err"; msg.textContent = err.message;
   } finally {
-    btn.disabled = false; btn.textContent = "🔥 Encender mi punto";
+    btn.disabled = false; btn.textContent = "Join the directory";
   }
 });
 
 function showDone(b, existing) {
-  const text = `Soy el builder #${b.n} de Latam/acc 🔥 Enciende tu punto en el mapa de Latam:`;
-  const url = `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent("https://latamacc.si")}&via=cesarsuarezpab`;
+  const text = `${b.kind === "company" ? `${b.name} is` : "I'm"} member #${b.n} of the Latam/acc directory ✦ AI companies and people building the golden era of Latin America:`;
   $("#done-n").textContent = "#" + b.n;
-  $("#done-title").textContent = existing ? `${b.name}, ya estabas encendido` : `${b.name}, ya estás en el mapa`;
-  $("#done-share").href = url;
+  $("#done-title").textContent = existing ? `${b.name} is already in the directory` : `${b.name}, you're on the map`;
+  $("#done-share").href = `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent("https://latamacc.si")}`;
   form.hidden = true; $("#done").hidden = false;
 }
 $("#done-again").addEventListener("click", () => { $("#done").hidden = true; form.hidden = false; $("#form-msg").textContent = ""; });
@@ -516,13 +529,12 @@ $("#done-again").addEventListener("click", () => { $("#done").hidden = true; for
 const io = new IntersectionObserver(es => es.forEach(e => {
   if (!e.isIntersecting) return;
   e.target.classList.add("in");
-  if (e.target.id === "tweet") { tweetShown = true; renderTweet(true); }
   io.unobserve(e.target);
 }), { threshold: 0.15 });
 document.querySelectorAll(".reveal").forEach(el => io.observe(el));
 new IntersectionObserver(([e]) => { heroVisible = e.isIntersecting; }).observe($(".hero"));
 
-const clock = () => { $("#clock").textContent = new Date().toLocaleTimeString("es-CO", { timeZone: "America/Bogota", hour12: false }) + " BOG"; };
+const clock = () => { $("#clock").textContent = new Date().toLocaleTimeString("en-GB", { timeZone: "America/Bogota", hour12: false }) + " BOG"; };
 clock(); setInterval(clock, 1000);
 setInterval(() => renderFeed(false), 60_000);
 
@@ -535,20 +547,20 @@ addEventListener("resize", layout);
   ]);
   S.map = map; buildGeometry(); layout();
   const sel = $("#country");
-  S.countries.filter(c => !c.deco).sort((a, b) => a.es.localeCompare(b.es, "es")).forEach(c => sel.add(new Option(`${flag(c.code)} ${c.es}`, c.code)));
+  S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => sel.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));
 
   S.total = state.total; S.byCountry = state.byCountry; S.recent = state.recent; S.watching = state.watching || {};
   setOnline(state.online || 1);
   if (state.you && S.byCode[state.you] && !sel.value) sel.value = state.you;
-  // los registros existentes se encienden en cascada cuando termina el fuego
+  // los miembros existentes se encienden en cascada cuando termina el dorado
   const base = START + BURN;
   state.points.slice().reverse().forEach((b, i, arr) => {
     S.seen.add(b.id);
     const pt = placePoint(b);
     if (pt) { pt.born = base + (i / Math.max(1, arr.length)) * Math.min(3, arr.length * 0.15); S.points.push(pt); }
   });
-  renderStats(); renderFeed(false); renderBoard(); renderChips();
-  if (!tweetShown) renderTweet(false), $("#tweet-body").querySelectorAll(".w").forEach(w => w.classList.remove("on"));
+  renderStats(); renderFeed(false); renderBoard(); renderChips(); syncKind();
+  loadDir();
   connect();
   requestAnimationFrame(frame);
 })();

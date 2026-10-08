@@ -1,9 +1,9 @@
 # latamacc.si
 
-Sitio de **Latam Accelerationism (Latam/acc)**: mapa de Latam que se enciende en fuego, el post de @cesarsuarezpab y registro de builders que se encienden en vivo en el mapa de todos (WebSocket).
+Sitio de **Latam Accelerationism (Latam/acc)**, en inglés: directorio de empresas y personas de IA que construyen la golden era de la región. El mapa de Latam se enciende en dorado y cada registro se ilumina en vivo en el mapa de todos (WebSocket).
 
-- `server.mjs`: Node 24, sin framework. Estáticos de `public/`, `POST /api/register`, `GET /api/state`, WebSocket en `/ws` (joins, personas en línea y chispas por clic). Guarda en SQLite (`data/latamacc.db`, fuera de Git). Solo publica nombre + inicial, ciudad, país y proyecto; el correo nunca sale del servidor.
-- `public/app.js`: canvas del mapa (fuego, brasas, faros por registro, hover/clic), tweet animado y formulario.
+- `server.mjs`: Node 24, sin framework. Estáticos de `public/`, `POST /api/register` (persona o empresa), `GET /api/state`, `GET /api/directory?q=&kind=&country=`, WebSocket en `/ws` (joins, personas en línea y chispas por clic). Guarda en SQLite (`data/latamacc.db`, fuera de Git). El directorio es público (el formulario lo avisa); el correo nunca sale del servidor. `DATA_DIR` permite usar otra carpeta de datos para pruebas.
+- `public/app.js`: canvas del mapa (oro, faros por registro, arcos, hover/clic), formulario y directorio con búsqueda y filtros.
 - `scripts/build-map.mjs`: genera `public/assets/latam.json` desde world-atlas (`npm i` y luego `node scripts/build-map.mjs countries-50m.json`).
 
 ## Base de datos

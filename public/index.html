@@ -1,152 +1,136 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Latam Accelerationism · Latam/acc</title>
-  <meta name="description" content="Latam/acc: una nueva generación de makers latinoamericanos que acelera con IA. Enciende tu punto en el mapa." />
+  <title>Latam/acc · Latam Accelerationism</title>
+  <meta name="description" content="Latam/acc is a directory of AI companies and people building the golden era of our region. Join the directory." />
   <meta name="theme-color" content="#000000" />
   <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-  <meta property="og:title" content="Latam Accelerationism" />
-  <meta property="og:description" content="If you see this sign, you have been chosen. Enciende tu punto en el mapa. Latam/acc 🫡" />
+  <meta property="og:title" content="Latam/acc · Latam Accelerationism" />
+  <meta property="og:description" content="A directory of AI companies and people building the golden era of Latin America. Join the directory." />
   <meta property="og:image" content="https://latamacc.si/assets/og.jpg" />
   <meta property="og:url" content="https://latamacc.si/" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:site" content="@cesarsuarezpab" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/styles.css?v=1791431830" />
+  <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <div id="intro" class="intro" hidden>
     <img src="/assets/mark.png" alt="" />
-    <p class="mono">If you see this sign,<br />you have been chosen.</p>
-    <span class="mono skip">clic para entrar</span>
+    <p class="mono">Latam Accelerationism</p>
+    <span class="mono skip">click to enter</span>
   </div>
   <nav>
     <div class="wrap">
       <a class="brand" href="#top"><img src="/assets/mark.png" alt="" /> Latam/acc</a>
       <div class="nav-r">
-        <span class="live mono"><i></i><b id="nav-online">1</b> en vivo</span>
-        <a class="hide-sm" href="#cesar">Manifiesto</a>
-        <a class="pill" href="#unete">Enciende tu punto</a>
+        <span class="live mono"><i></i><b id="nav-online">1</b> live</span>
+        <a class="hide-sm" href="#directory">Directory</a>
+        <a class="pill" href="#join">Join the directory</a>
       </div>
     </div>
   </nav>
 
   <header class="hero" id="top">
-    <canvas id="map" aria-label="Mapa de Latinoamérica encendiéndose. Cada punto es un builder registrado."></canvas>
+    <canvas id="map" aria-label="Map of Latin America lighting up in gold. Each light is a member of the directory."></canvas>
     <div class="hero-copy">
       <p class="kicker mono">LATAM/ACC · <span id="clock"></span></p>
       <h1>Latam<br />Accelerationism</h1>
-      <p class="tag mono">If you see this sign,<br />you have been chosen.</p>
+      <p class="tag">Latam/acc is a directory of AI companies and people building the <b>golden era</b> of our region.</p>
       <div class="counters">
-        <div><b id="total">0</b><span>builders encendidos</span></div>
-        <div><b id="online">1</b><span>viendo ahora</span></div>
-        <div><b id="countries-lit">0</b><span>/ 24 países</span></div>
+        <div><b id="total">0</b><span>in the directory</span></div>
+        <div><b id="online">1</b><span>watching now</span></div>
+        <div><b id="countries-lit">0</b><span>/ 24 countries</span></div>
       </div>
       <div class="cta">
-        <a class="btn primary" href="#unete">🔥 Enciende tu punto</a>
-        <a class="btn" href="#cesar">Leer a César</a>
+        <a class="btn primary" href="#join">Join the directory</a>
+        <a class="btn" href="#directory">Browse</a>
       </div>
-      <p class="hint mono">Pasa el cursor por el mapa · haz clic para lanzar una chispa que todos ven</p>
+      <p class="hint mono">Hover the map · click to send a spark everyone sees</p>
     </div>
     <div id="tooltip" class="tooltip" hidden></div>
     <ol id="ticker" class="ticker" aria-live="polite"></ol>
   </header>
 
-  <section id="cesar" class="tweet-section">
-    <div class="wrap narrow">
-      <p class="kicker mono reveal">01 — El post que lo empezó</p>
-      <article class="tweet reveal" id="tweet">
-        <header>
-          <img src="/assets/cesar.jpg" alt="César Suárez" width="48" height="48" />
-          <div>
-            <b>Jack 🇨🇴🇧🇷/acc <svg viewBox="0 0 22 22" width="16" height="16" aria-label="verificado"><path fill="#1d9bf0" d="M20.4 11c0-1.3-.8-2.4-1.9-2.9.4-1.2.2-2.6-.7-3.5s-2.3-1.1-3.5-.7C13.8 2.8 12.7 2 11.4 2s-2.4.8-2.9 1.9c-1.2-.4-2.6-.2-3.5.7s-1.1 2.3-.7 3.5C3.2 8.6 2.4 9.7 2.4 11s.8 2.4 1.9 2.9c-.4 1.2-.2 2.6.7 3.5s2.3 1.1 3.5.7c.5 1.1 1.6 1.9 2.9 1.9s2.4-.8 2.9-1.9c1.2.4 2.6.2 3.5-.7s1.1-2.3.7-3.5c1.1-.5 1.9-1.6 1.9-2.9z"/><path fill="#fff" d="M9.6 14.6 6.8 11.8l1.1-1.1 1.7 1.7 4.5-4.5 1.1 1.1z"/></svg></b>
-            <span class="mono">@cesarsuarezpab</span>
-          </div>
-          <a class="x" href="https://x.com/cesarsuarezpab/status/2107863661297500599" target="_blank" rel="noopener" aria-label="Ver en X">𝕏</a>
-        </header>
-        <div class="tweet-body" id="tweet-body"></div>
-        <ul class="tweet-countries" id="tweet-countries"></ul>
-        <p class="tweet-sign">Latam/acc 🫡</p>
-        <footer class="mono">
-          <span>11:00 AM · 7 oct 2026</span>
-          <button id="translate" class="link">Traducir al español</button>
-        </footer>
-      </article>
-      <div class="tweet-stats reveal">
-        <div><b>+1.000</b><span>seguidores nuevos</span></div>
-        <div><b>1M+</b><span>vistas en días</span></div>
-        <div><b>24</b><span>países</span></div>
-      </div>
-    </div>
-  </section>
-
-  <section id="unete" class="join">
+  <section id="join" class="join">
     <div class="wrap join-grid">
       <div>
-        <p class="kicker mono reveal">02 — Únete</p>
-        <h2 class="reveal">Enciende tu punto en el mapa.</h2>
-        <p class="lead reveal">Cada builder que se registra se enciende en vivo en el mapa de todos los que están mirando. Solo mostramos tu nombre, tu ciudad y lo que construyes.</p>
+        <p class="kicker mono reveal">01 — Register below</p>
+        <h2 class="reveal">Join the directory.</h2>
+        <p class="lead reveal">Building with AI in Latin America? Add yourself or your company. Your light turns on live, on everyone's map.</p>
         <form id="form" class="form reveal" novalidate>
-          <div class="row">
-            <label>Nombre<input name="name" required maxlength="60" autocomplete="name" placeholder="Ana Pérez" /></label>
-            <label>Correo<input name="email" type="email" required maxlength="120" autocomplete="email" placeholder="ana@startup.co" /></label>
+          <div class="seg" role="radiogroup" aria-label="Register as">
+            <label><input type="radio" name="kind" value="person" checked /> <span>Person</span></label>
+            <label><input type="radio" name="kind" value="company" /> <span>Company</span></label>
           </div>
           <div class="row">
-            <label>País<select name="country" id="country" required><option value="">Elige tu país</option></select></label>
-            <label>Ciudad<input name="city" maxlength="60" autocomplete="address-level2" placeholder="Bogotá" /></label>
+            <label><span id="name-label">Full name</span><input name="name" required maxlength="60" autocomplete="name" placeholder="Ana Pérez" /></label>
+            <label><span>Email <span class="opt">(private)</span></span><input name="email" type="email" required maxlength="120" autocomplete="email" placeholder="ana@startup.ai" /></label>
           </div>
-          <label>¿Qué estás construyendo?<input name="building" maxlength="140" placeholder="Un agente que automatiza…" /></label>
-          <label><span>Usuario de X <span class="opt">(opcional)</span></span><input name="handle" maxlength="30" placeholder="@tuusuario" /></label>
-          <input name="website" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
-          <button class="btn primary big" type="submit" id="submit">🔥 Encender mi punto</button>
+          <label class="person-only"><span>Company <span class="opt">(optional)</span></span><input name="company" maxlength="80" autocomplete="organization" placeholder="Where you build" /></label>
+          <div class="row">
+            <label>Country<select name="country" id="country" required><option value="">Select your country</option></select></label>
+            <label>City<input name="city" maxlength="60" autocomplete="address-level2" placeholder="Bogotá" /></label>
+          </div>
+          <label><span id="building-label">What are you building?</span><input name="building" maxlength="140" placeholder="AI agents for SMB accounting" /></label>
+          <div class="row">
+            <label><span>Website <span class="opt">(optional)</span></span><input name="website" maxlength="120" inputmode="url" placeholder="startup.ai" /></label>
+            <label><span>X handle <span class="opt">(optional)</span></span><input name="handle" maxlength="30" placeholder="@handle" /></label>
+          </div>
+          <input name="hp_field" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
+          <p class="fine">Everything except your email is shown publicly in the directory.</p>
+          <button class="btn primary big" type="submit" id="submit">Join the directory</button>
           <p class="form-msg" id="form-msg" role="status"></p>
         </form>
         <div id="done" class="done" hidden>
-          <span class="mono">BUILDER</span>
+          <span class="mono">MEMBER</span>
           <b id="done-n">#1</b>
-          <h3 id="done-title">Ya estás en el mapa</h3>
-          <p>Tu punto quedó encendido para todos. Ahora haz ruido: compártelo y trae a tu gente.</p>
+          <h3 id="done-title">You're on the map</h3>
+          <p>Your light is on for everyone. Now bring your people: share it.</p>
           <div class="cta">
-            <a id="done-share" class="btn primary" target="_blank" rel="noopener">Compartir en 𝕏</a>
-            <button id="done-again" class="btn" type="button">Registrar a alguien más</button>
+            <a id="done-share" class="btn primary" target="_blank" rel="noopener">Share on 𝕏</a>
+            <button id="done-again" class="btn" type="button">Add someone else</button>
           </div>
         </div>
       </div>
       <aside class="feed reveal">
-        <div class="feed-head mono"><i></i> Últimos en encenderse</div>
+        <div class="feed-head mono"><i></i> Just joined</div>
         <ol id="feed"></ol>
-        <div class="feed-head mono">Países más encendidos</div>
+        <div class="feed-head mono">Top countries</div>
         <ol id="board" class="board"></ol>
       </aside>
     </div>
   </section>
 
-  <section id="moral">
+  <section id="directory">
     <div class="wrap">
-      <p class="kicker mono reveal">03 — La moral latam/acc</p>
-      <p class="quote reveal">Déjalo mejor de lo que lo encontraste. <em>Pero recuerda ser loco.</em></p>
-      <ul class="principles">
-        <li class="reveal"><span class="mono">01</span><div>Haz algo loco mañana: un DM, lanzar un feature, viajar a un evento.</div></li>
-        <li class="reveal"><span class="mono">02</span><div>Solo puedes darte ese lujo con buena reputación, buenos valores y buen karma. Ambos componen a largo plazo.</div></li>
-        <li class="reveal"><span class="mono">03</span><div>Si no puedes contarlo en la radio con orgullo, no lo hagas. No hay almuerzo gratis.</div></li>
-        <li class="reveal"><span class="mono">04</span><div>Somos menos del 1%, pero lo que construimos impacta al 99%: hazlo bueno, hazlo fácil, que mueva a toda la humanidad.</div></li>
-      </ul>
+      <p class="kicker mono reveal">02 — The directory</p>
+      <h2 class="reveal">Who's building the golden era.</h2>
+      <div class="filters reveal">
+        <input id="q" type="search" placeholder="Search people, companies, cities…" aria-label="Search the directory" />
+        <div class="seg small" role="radiogroup" aria-label="Filter by type">
+          <label><input type="radio" name="fkind" value="" checked /> <span>All</span></label>
+          <label><input type="radio" name="fkind" value="person" /> <span>People</span></label>
+          <label><input type="radio" name="fkind" value="company" /> <span>Companies</span></label>
+        </div>
+      </div>
+      <ul id="country-chips" class="chips reveal"></ul>
+      <ul id="dir" class="dir"></ul>
     </div>
   </section>
 
   <footer class="foot">
     <div class="wrap">
-      <span class="mono">Latam/acc 🫡 — latamacc.si</span>
-      <a href="https://x.com/cesarsuarezpab" target="_blank" rel="noopener">@cesarsuarezpab ↗</a>
+      <span class="mono">Latam/acc — latamacc.si</span>
+      <span>Contact: Jack · <a href="https://x.com/cesarsuarezpab" target="_blank" rel="noopener">𝕏 @cesarsuarezpab</a></span>
     </div>
   </footer>
 
   <div id="toast" class="toast" hidden></div>
-  <script type="module" src="/app.js?v=1791431830"></script>
+  <script type="module" src="/app.js"></script>
 </body>
 </html>

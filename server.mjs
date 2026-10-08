@@ -1,4 +1,4 @@
-// Servidor de latamacc.si: estáticos, registro de builders y WebSocket en vivo.
+// Servidor de latamacc.si: estáticos, directorio de builders/empresas de IA y WebSocket en vivo.
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { mkdirSync, readFileSync, readdirSync, rmSync, chmodSync, statSync } from "node:fs";
@@ -16,7 +16,7 @@ const COUNTRIES = new Set(
   JSON.parse(readFileSync(join(PUBLIC, "assets/latam.json"), "utf8")).countries.filter(c => !c.deco).map(c => c.code)
 );
 
-const DATA = join(ROOT, "data"), BACKUPS = join(DATA, "backups"), DB_FILE = join(DATA, "latamacc.db");
+const DATA = process.env.DATA_DIR || join(ROOT, "data"), BACKUPS = join(DATA, "backups"), DB_FILE = join(DATA, "latamacc.db");
 mkdirSync(BACKUPS, { recursive: true, mode: 0o700 });
 chmodSync(DATA, 0o700);
 const db = new DatabaseSync(DB_FILE);
@@ -25,7 +25,15 @@ db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_tim
 db.exec(`CREATE TABLE IF NOT EXISTS builders (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, country TEXT NOT NULL,
   city TEXT, building TEXT, handle TEXT, ip TEXT, created_at INTEGER NOT NULL)`);
-const insert = db.prepare(`INSERT INTO builders (id,name,email,country,city,building,handle,ip,created_at) VALUES (?,?,?,?,?,?,?,?,?)`);
+// Columnas del directorio (migración en caliente para bases existentes).
+const cols = new Set(db.prepare("PRAGMA table_info(builders)").all().map(c => c.name));
+for (const [col, def] of [["kind", "TEXT NOT NULL DEFAULT 'person'"], ["company", "TEXT"], ["website", "TEXT"]])
+  if (!cols.has(col)) db.exec(`ALTER TABLE builders ADD COLUMN ${col} ${def}`);
+const insert = db.prepare(`INSERT INTO builders (id,kind,name,company,email,country,city,building,website,handle,ip,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+const directoryQ = db.prepare(`SELECT rowid AS n, * FROM builders
+  WHERE (:country = '' OR country = :country) AND (:kind = '' OR kind = :kind)
+    AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like)
+  ORDER BY created_at DESC LIMIT 60 OFFSET :offset`);
 const byEmail = db.prepare(`SELECT rowid AS n, * FROM builders WHERE email = ?`);
 const recentQ = db.prepare(`SELECT rowid AS n, * FROM builders ORDER BY created_at DESC LIMIT 30`);
 const numberQ = db.prepare(`SELECT rowid AS n FROM builders WHERE id = ?`);
@@ -53,11 +61,10 @@ function backup() {
 backup();
 setInterval(backup, 60 * 60_000);
 
-// Solo se publica nombre + inicial del apellido; el correo nunca sale del servidor.
+// Es un directorio público: el formulario avisa qué se publica. El correo nunca sale del servidor.
 function publicView(r) {
-  const parts = r.name.trim().split(/\s+/);
-  const name = parts[0] + (parts[1] ? " " + parts[1][0].toUpperCase() + "." : "");
-  return { id: r.id, n: r.n, name, country: r.country, city: r.city || "", building: r.building || "", handle: r.handle || "", ts: r.created_at };
+  return { id: r.id, n: r.n, kind: r.kind || "person", name: r.name, company: r.company || "", country: r.country, city: r.city || "",
+    building: r.building || "", website: r.website || "", handle: r.handle || "", ts: r.created_at };
 }
 
 function state() {
@@ -108,26 +115,31 @@ async function readBody(req, limit = 4096) {
 
 async function register(req, res) {
   const ip = clientIp(req);
-  if (limited(ip)) return json(res, 429, { error: "Demasiados intentos, espera un minuto." });
+  if (limited(ip)) return json(res, 429, { error: "Too many attempts, please wait a minute." });
   let b;
-  try { b = await readBody(req); } catch { return json(res, 400, { error: "Solicitud inválida." }); }
-  if (b.website) return json(res, 200, { ok: true }); // honeypot
+  try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
+  if (b.hp_field) return json(res, 200, { ok: true }); // honeypot
   const name = clean(b.name, 60);
   const email = clean(b.email, 120).toLowerCase();
   const country = clean(b.country, 2).toUpperCase();
-  if (name.length < 2) return json(res, 400, { error: "Escribe tu nombre." });
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { error: "Correo inválido." });
-  if (!COUNTRIES.has(country)) return json(res, 400, { error: "Elige un país de Latam." });
+  const kind = b.kind === "company" ? "company" : "person";
+  let website = clean(b.website, 120);
+  if (website && !/^https?:\/\//i.test(website)) website = "https://" + website;
+  try { if (website) { const u = new URL(website); if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".")) throw 0; website = u.href; } }
+  catch { return json(res, 400, { error: "That website doesn't look right." }); }
+  if (name.length < 2) return json(res, 400, { error: kind === "company" ? "Add the company name." : "Add your name." });
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { error: "Invalid email." });
+  if (!COUNTRIES.has(country)) return json(res, 400, { error: "Pick a Latam country." });
 
   const existing = byEmail.get(email);
   if (existing) return json(res, 200, { ok: true, existing: true, builder: publicView(existing) });
 
   const row = {
-    id: randomUUID(), name, email, country,
+    id: randomUUID(), kind, name, company: kind === "person" ? clean(b.company, 80) : "", email, country, website,
     city: clean(b.city, 60), building: clean(b.building, 140), handle: clean(b.handle, 30).replace(/^@/, ""),
     ip, created_at: Date.now(),
   };
-  insert.run(row.id, row.name, row.email, row.country, row.city, row.building, row.handle, row.ip, row.created_at);
+  insert.run(row.id, row.kind, row.name, row.company, row.email, row.country, row.city, row.building, row.website, row.handle, row.ip, row.created_at);
   const pub = publicView({ ...row, n: numberQ.get(row.id).n });
   broadcast({ type: "join", builder: pub, total: totalQ.get().n });
   json(res, 201, { ok: true, builder: pub });
@@ -176,12 +188,18 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { ...state(), you: COUNTRIES.has(you) ? you : "" });
     }
     if (pathname === "/api/health" && req.method === "GET") return json(res, 200, health());
+    if (pathname === "/api/directory" && req.method === "GET") {
+      const u = new URL(req.url, "http://x").searchParams;
+      const q = clean(u.get("q") || "", 60), country = clean(u.get("country") || "", 2).toUpperCase(), kind = clean(u.get("kind") || "", 10);
+      const rows = directoryQ.all({ q, like: `%${q}%`, country, kind: ["person", "company"].includes(kind) ? kind : "", offset: Math.max(0, Number(u.get("offset")) || 0) });
+      return json(res, 200, { entries: rows.map(publicView) });
+    }
     if (pathname === "/api/register" && req.method === "POST") return await register(req, res);
     if (pathname.startsWith("/api/")) return json(res, 404, { error: "not found" });
     return await serveStatic(req, res);
   } catch (e) {
     console.error(e);
-    json(res, 500, { error: "Error interno." });
+    json(res, 500, { error: "Something went wrong." });
   }
 });
 
