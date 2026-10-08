@@ -1,0 +1,10 @@
+{
+  // Sitio estático de latamacc.com servido con Workers Static Assets.
+  "name": "latamacc",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./public", "not_found_handling": "404-page" },
+  "routes": [
+    { "pattern": "latamacc.com", "custom_domain": true },
+    { "pattern": "www.latamacc.com", "custom_domain": true }
+  ]
+}
