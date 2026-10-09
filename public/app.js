@@ -525,26 +525,41 @@ function showDone(b, existing) {
 }
 $("#done-again").addEventListener("click", () => { $("#done").hidden = true; form.hidden = false; $("#form-msg").textContent = ""; });
 
-// ---------- merch ----------
-const merch = $("#merch-form");
-merch.addEventListener("input", () => {
-  const q = Math.min(10, Math.max(1, Math.trunc(Number(merch.qty.value)) || 1));
-  $("#merch-submit").textContent = `Reserve yours · $${49 * q}`;
+// ---------- merch (coming soon) ----------
+const notify = $("#notify");
+const ITEM_NAMES = { tee: "Tee", hoodie: "Hoodie", cap: "Cap", tote: "Tote" };
+function pickItem(li) {
+  document.querySelectorAll(".drop").forEach(d => d.classList.toggle("picked", d === li));
+  notify.item.value = li.dataset.item;
+  $("#notify-item").textContent = ITEM_NAMES[li.dataset.item];
+}
+document.querySelectorAll(".drop").forEach(li => {
+  li.addEventListener("click", () => { pickItem(li); li.querySelector(".flip")?.classList.toggle("turned"); });
+  li.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); li.click(); } });
+  // inclinación 3D siguiendo el cursor
+  li.addEventListener("pointermove", e => {
+    if (reduced) return;
+    const r = li.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width - 0.5, y = (e.clientY - r.top) / r.height - 0.5;
+    li.style.setProperty("--rx", `${-y * 10}deg`); li.style.setProperty("--ry", `${x * 14}deg`);
+    li.style.setProperty("--gx", `${(x + 0.5) * 100}%`); li.style.setProperty("--gy", `${(y + 0.5) * 100}%`);
+  });
+  li.addEventListener("pointerleave", () => { li.style.setProperty("--rx", "0deg"); li.style.setProperty("--ry", "0deg"); });
 });
-merch.addEventListener("submit", async e => {
+pickItem(document.querySelector(".drop"));
+notify.addEventListener("submit", async e => {
   e.preventDefault();
-  const msg = $("#merch-msg"), btn = $("#merch-submit");
-  const data = Object.fromEntries(new FormData(merch));
+  const msg = $("#notify-msg"), btn = $("#notify-btn");
+  const data = Object.fromEntries(new FormData(notify));
   msg.className = "form-msg"; msg.textContent = "";
-  if (!data.email.includes("@") || !data.country) { msg.className = "form-msg err"; msg.textContent = "Please add your email and shipping country."; return; }
+  if (!data.email.includes("@")) { msg.className = "form-msg err"; msg.textContent = "Please add your email."; return; }
   btn.disabled = true;
   try {
-    const r = await fetch("/api/merch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+    const r = await fetch("/api/merch/notify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
     const j = await r.json();
-    if (!r.ok) throw new Error(j.error || "Could not reserve.");
-    msg.className = "form-msg ok";
-    msg.textContent = `Reserved ✦ ${data.qty} × ${data.size} ($${j.total} USD). We'll email you to confirm payment and shipping.`;
-    merch.reset(); merch.dispatchEvent(new Event("input"));
+    if (!r.ok) throw new Error(j.error || "Could not save.");
+    msg.className = "form-msg ok"; msg.textContent = `You're on the list for the ${ITEM_NAMES[data.item]} ✦ We'll email you when the drop is live.`;
+    notify.email.value = "";
   } catch (err) {
     msg.className = "form-msg err"; msg.textContent = err.message;
   } finally { btn.disabled = false; }
@@ -576,9 +591,7 @@ addEventListener("resize", layout);
 
   S.total = state.total; S.byCountry = state.byCountry; S.recent = state.recent; S.watching = state.watching || {};
   setOnline(state.online || 1);
-  const msel = $("#merch-country");
-  S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => msel.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));
-  if (state.you && S.byCode[state.you]) { if (!sel.value) sel.value = state.you; msel.value = state.you; }
+  if (state.you && S.byCode[state.you] && !sel.value) sel.value = state.you;
   // los miembros existentes se encienden en cascada cuando termina el dorado
   const base = START + BURN;
   state.points.slice().reverse().forEach((b, i, arr) => {
