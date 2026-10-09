@@ -88,7 +88,7 @@ h2 { font-size: clamp(30px, 4.6vw, 54px); line-height: 1.04; letter-spacing: -.0
 .form input, .form select { width: 100%; background: var(--card); border: 1px solid #332e29; color: var(--fg); border-radius: 10px;
   padding: 12px 14px; font: 15px Inter, sans-serif; outline: none; transition: .2s; }
 .form input:focus, .form select:focus { border-color: var(--fire); box-shadow: 0 0 0 3px rgba(240,200,110,.18); }
-.form .hp { position: absolute; left: -9999px; width: 1px; height: 1px; }
+.form .hp, .preorder .hp { position: absolute; left: -9999px; width: 1px; height: 1px; }
 .form-msg { min-height: 1.4em; font-size: 14px; }
 .form-msg.err { color: #ff8f80; }
 .form-msg.ok { color: var(--fire2); }
