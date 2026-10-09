@@ -85,11 +85,12 @@ try {
   }
   if (!config.webhookId) throw new Error("Saved webhook ID is missing. Reconcile the existing webhook in the dashboard.");
   // Repeat readback on recovery as well: saved IDs alone do not prove readiness.
+  // The SDK's /public route returns paylink configuration without merchant credentials.
   const [savedPaylink, savedWebhook] = await Promise.all([
-    api.request(`/paylink/${encodeURIComponent(config.paylinkId)}`, undefined, { origin: "https://latamacc.si" }),
+    api.getPublicPaylink(config.paylinkId),
     api.request(`/webhook/paylink/transaction/${encodeURIComponent(config.webhookId)}`),
   ]);
-  if (savedPaylink.id !== config.paylinkId || savedPaylink.dynamic !== true || savedPaylink.pricingCurrency?.id !== USD_ID ||
+  if (savedPaylink?.id !== config.paylinkId || savedPaylink.dynamic !== true || savedPaylink.pricingCurrency?.id !== USD_ID ||
       savedPaylink.features?.canChangePrice !== false || savedPaylink.features?.canChangeQuantity !== false ||
       savedPaylink.disabled || savedPaylink.inactive || savedPaylink.recipients?.length !== 1 || !savedPaylink.recipients?.some(r =>
         r.wallet?.id === wallet.id && r.wallet?.publicKey === wallet.publicKey && r.currency?.id === usdc.id))

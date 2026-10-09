@@ -16,9 +16,12 @@ async function launch(dir, config, mock = false) {
   const preload = `import{readFileSync,writeFileSync}from'node:fs';import{randomUUID}from'node:crypto';
     const records=[];globalThis.fetch=async(u,init)=>{const url=new URL(u),state=JSON.parse(readFileSync(${JSON.stringify(fixture)},'utf8'));
       if(url.hostname!=='api.hel.io')throw Error('No external requests allowed in test');
+      if(url.pathname.endsWith('/expire'))return new Response(null,{status:204});
       if(init.method==='POST'){const b=JSON.parse(init.body),token=randomUUID(),id=randomUUID();records.push({b,token,id});writeFileSync(${JSON.stringify(requests)},JSON.stringify(records));return Response.json({id,pageUrl:'https://app.hel.io/charge/'+token});}
       const token=url.pathname.split('/').at(-1),r=records.find(r=>r.token===token);if(!r)return new Response('',{status:404});
-      return Response.json({id:r.id,token,pricingCurrencyRequestAmount:state.wrongAmount?'1':r.b.requestAmount,paylink:{id:'test-paylink',pricingCurrency:{id:${JSON.stringify(USD_ID)}}},
+      return Response.json({id:r.id,token,pricingCurrencyRequestAmount:state.wrongAmount?'1':String(BigInt(r.b.requestAmount)*1000000n),
+        paylink:{id:'test-paylink',pricingCurrency:{id:${JSON.stringify(USD_ID)}},dynamic:true,disabled:false,inactive:false,
+          features:{canChangePrice:false,canChangeQuantity:false},recipients:[{wallet:{id:'main-wallet',publicKey:'MainWallet'},currency:{id:${JSON.stringify(USDC_SOL_ID)}}}]},
         paylinkTx:state.paid?{id:state.txId||('tx-'+token),paylinkId:'test-paylink',quantity:1,paymentType:'PAYLINK',fee:'980000',meta:{transactionStatus:'SUCCESS',transactionSignature:'sig-'+token,amount:'97020000',currency:{id:${JSON.stringify(USDC_SOL_ID)}},recipientPK:state.wrongRecipient?'WrongWallet':'MainWallet'}}:null});};`;
   const args = mock ? ["--import", `data:text/javascript;base64,${Buffer.from(preload).toString("base64")}`, "server.mjs"] : ["server.mjs"];
   const child = spawn(process.execPath, args, { cwd: new URL("..", import.meta.url).pathname,
@@ -74,7 +77,7 @@ test("HTTP checkout verifies provider receipts, capabilities, signed webhooks an
     const result = await post(app.base, { ...body, ft: s.ft, total: 1, requestAmount: "1" }).then(r => r.json());
     assert.equal(result.total, 98); assert.equal(result.payment.status, "awaiting_payment");
     const record = JSON.parse(readFileSync(app.requests))[0];
-    assert.equal(record.b.requestAmount, "98000000"); assert.equal(record.b.prepareRequestBody.quantity, 1);
+    assert.equal(record.b.requestAmount, "98"); assert.equal(record.b.prepareRequestBody.quantity, 1);
     const statusUrl = `${app.base}/api/merch/status?token=${result.payment.statusToken}`;
     const awaiting = await fetch(statusUrl).then(r => r.json()); assert.equal(awaiting.status, "awaiting_payment");
     assert.ok(!JSON.stringify(awaiting).includes(body.email));
@@ -92,7 +95,9 @@ test("HTTP checkout verifies provider receipts, capabilities, signed webhooks an
     assert.equal(hook.status, 200); assert.equal((await fetch(statusUrl).then(r => r.json())).status, "paid");
     assert.equal((await fetch(app.base + "/api/moonpay/webhook", { method: "POST", body: raw,
       headers: { authorization: `Bearer ${cfg.webhookToken}`, "x-signature": signature } })).status, 200);
+    writeFileSync(app.fixture, JSON.stringify({ paid: false }));
     const second = await post(app.base, { ...body, ft: s.ft }).then(r => r.json());
+    writeFileSync(app.fixture, JSON.stringify({ paid: true, txId: "unique-tx" }));
     assert.equal((await fetch(`${app.base}/api/merch/status?token=${second.payment.statusToken}`)).status, 502);
     await app.stop(); app = null;
     const db = new DatabaseSync(join(dir, "latamacc.db"), { readOnly: true });
