@@ -6,6 +6,7 @@ import { join, extname, normalize } from "node:path";
 import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { WebSocketServer } from "ws";
+import { loadMoonpayConfig, MoonpayCommerce, USD_ID, validateCharge, verifyWebhook } from "./lib/moonpay.mjs";
 
 const ROOT = new URL(".", import.meta.url).pathname;
 const PUBLIC = join(ROOT, "public");
@@ -40,16 +41,36 @@ const numberQ = db.prepare(`SELECT rowid AS n FROM builders WHERE id = ?`);
 const pointsQ = db.prepare(`SELECT id, country, created_at FROM builders ORDER BY created_at DESC LIMIT 5000`);
 const countsQ = db.prepare(`SELECT country, COUNT(*) n FROM builders GROUP BY country`);
 const totalQ = db.prepare(`SELECT COUNT(*) n FROM builders`);
-// Preventa de merch: se guarda la reserva, sin cobro (el pago se confirma por correo).
+// Reservas y cobros: las credenciales y el estado de pago permanecen en el servidor.
 db.exec(`CREATE TABLE IF NOT EXISTS merch_orders (
   id TEXT PRIMARY KEY, item TEXT NOT NULL, size TEXT NOT NULL, qty INTEGER NOT NULL, name TEXT, email TEXT NOT NULL,
   country TEXT, ip TEXT, created_at INTEGER NOT NULL)`);
+const orderColumns = new Set(db.prepare("PRAGMA table_info(merch_orders)").all().map(c => c.name));
+for (const [column, definition] of [
+  ["status", "TEXT NOT NULL DEFAULT 'reserved'"], ["total_cents", "INTEGER"],
+  ["payment_amount", "TEXT"], ["payment_currency", "TEXT"], ["status_token", "TEXT"],
+  ["charge_token", "TEXT"], ["charge_id", "TEXT"], ["checkout_url", "TEXT"], ["expires_at", "INTEGER"],
+  ["payment_tx_id", "TEXT"], ["payment_signature", "TEXT"], ["paid_at", "INTEGER"],
+]) if (!orderColumns.has(column)) db.exec(`ALTER TABLE merch_orders ADD COLUMN ${column} ${definition}`);
+for (const column of ["status_token", "charge_token", "payment_tx_id"])
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS merch_${column}_unique ON merch_orders(${column})`);
 const insertOrder = db.prepare(`INSERT INTO merch_orders (id,item,size,qty,name,email,country,ip,created_at) VALUES (?,?,?,?,?,?,?,?,?)`);
+const orderByStatus = db.prepare("SELECT * FROM merch_orders WHERE status_token = ?");
+const orderByCharge = db.prepare("SELECT * FROM merch_orders WHERE charge_token = ?");
+const orderByTransaction = db.prepare("SELECT id FROM merch_orders WHERE payment_tx_id = ?");
+const startPayment = db.prepare(`UPDATE merch_orders SET status = 'awaiting_payment', total_cents = ?,
+  payment_amount = ?, payment_currency = ?, status_token = ? WHERE id = ?`);
+const attachCharge = db.prepare(`UPDATE merch_orders SET charge_token = ?, charge_id = ?, checkout_url = ?, expires_at = ? WHERE id = ?`);
+const paymentStatus = db.prepare("UPDATE merch_orders SET status = ? WHERE id = ? AND status <> 'paid'");
+const confirmPayment = db.prepare(`UPDATE merch_orders SET status = 'paid', payment_tx_id = ?, payment_signature = ?, paid_at = ? WHERE id = ?`);
 const ordersQ = db.prepare(`SELECT COUNT(*) n FROM merch_orders`);
 const MERCH = {
   tee: { price: 49, sizes: ["S", "M", "L", "XL", "XXL"] },
   cap: { price: null, sizes: ["ONE"] }, // precio por confirmar
 };
+const MOONPAY_CONFIG = loadMoonpayConfig();
+const MOONPAY = MOONPAY_CONFIG ? new MoonpayCommerce(MOONPAY_CONFIG) : null;
+const merchPayments = () => ({ tee: !!MOONPAY, cap: false });
 
 // Anti-bots: token firmado que se entrega al cargar la página. Un envío sin token, o hecho en menos de
 // 3 s, no viene de una persona usando el formulario. Turnstile se suma cuando hay claves configuradas.
@@ -82,9 +103,9 @@ async function humanCheck(b, ip) {
 for (const f of [DB_FILE, DB_FILE + "-wal", DB_FILE + "-shm"]) { try { chmodSync(f, 0o600); } catch {} }
 
 // Copias de seguridad: una al arrancar y cada hora si hubo registros nuevos; se guardan las últimas 72.
-let lastBackup = null, lastBackupTotal = "";
+let lastBackup = null, lastBackupTotal = "", dataRevision = 0;
 function backup() {
-  const total = `${totalQ.get().n}/${ordersQ.get().n}`;
+  const total = `${totalQ.get().n}/${ordersQ.get().n}/${dataRevision}`;
   if (total === lastBackupTotal) return;
   const stamp = new Date().toISOString().replace(/[-:.]/g, "").slice(0, 18);
   const file = join(BACKUPS, `latamacc-${stamp}.db`);
@@ -101,7 +122,7 @@ backup();
 setInterval(backup, 60 * 60_000);
 // Además, respaldo 30 s después de cada escritura (agrupa ráfagas de registros).
 let backupSoon;
-const scheduleBackup = () => { clearTimeout(backupSoon); backupSoon = setTimeout(backup, 30_000); };
+const scheduleBackup = () => { dataRevision++; clearTimeout(backupSoon); backupSoon = setTimeout(backup, 30_000); };
 
 // Es un directorio público: el formulario avisa qué se publica. El correo nunca sale del servidor.
 function publicView(r) {
@@ -116,6 +137,7 @@ function state() {
     recent: recentQ.all().map(publicView),
     points: pointsQ.all().map(r => ({ id: r.id, country: r.country, ts: r.created_at })),
     ...presence(),
+    merchPayments: merchPayments(),
   };
 }
 
@@ -129,7 +151,7 @@ function presence() {
 function health() {
   return { ok: true, builders: totalQ.get().n, dbBytes: statSync(DB_FILE).size, journal: db.prepare("PRAGMA journal_mode").get().journal_mode,
     lastBackup: lastBackup && { at: new Date(lastBackup.at).toISOString(), builders: lastBackup.builders, preorders: lastBackup.orders }, preorders: ordersQ.get().n,
-    turnstile: !!TURNSTILE, online: wss.clients.size };
+    turnstile: !!TURNSTILE, moonpay: !!MOONPAY, online: wss.clients.size };
 }
 
 const clean = (v, max) => (typeof v === "string" ? v.replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, max) : "");
@@ -151,9 +173,12 @@ function json(res, code, body) {
 }
 
 async function readBody(req, limit = 4096) {
+  return JSON.parse((await readRawBody(req, limit)).toString("utf8") || "{}");
+}
+async function readRawBody(req, limit = 4096) {
   let size = 0, chunks = [];
   for await (const c of req) { size += c.length; if (size > limit) throw new Error("too large"); chunks.push(c); }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  return Buffer.concat(chunks);
 }
 
 async function register(req, res) {
@@ -199,19 +224,81 @@ async function merchPreorder(req, res) {
   const human = await humanCheck(b, ip);
   if (human === "bot") return json(res, 200, { ok: true });
   if (human) return json(res, 400, { error: human });
-  const item = MERCH[b.item] ? b.item : null;
+  const item = Object.hasOwn(MERCH, b.item) ? b.item : null;
   const email = clean(b.email, 120).toLowerCase();
   const size = clean(b.size, 4).toUpperCase();
-  const qty = Math.trunc(Number(b.qty));
+  const qty = Number(b.qty);
   const country = clean(b.country, 2).toUpperCase();
   if (!item) return json(res, 400, { error: "Pick the tee or the cap." });
   if (!MERCH[item].sizes.includes(size)) return json(res, 400, { error: "Pick a size." });
-  if (!(qty >= 1 && qty <= 10)) return json(res, 400, { error: "Quantity must be 1 to 10." });
+  if (!Number.isInteger(qty) || !(qty >= 1 && qty <= 10)) return json(res, 400, { error: "Quantity must be 1 to 10." });
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { error: "Invalid email." });
   if (!COUNTRIES.has(country)) return json(res, 400, { error: "Pick a Latam country for shipping." });
-  insertOrder.run(randomUUID(), item, size, qty, clean(b.name, 60), email, country, ip, Date.now());
+  const order = { id: randomUUID(), item, size, qty, name: clean(b.name, 60), email, country, created_at: Date.now() };
+  insertOrder.run(order.id, item, size, qty, order.name, email, country, ip, order.created_at);
   scheduleBackup();
-  json(res, 201, { ok: true, item, size, qty, total: MERCH[item].price && MERCH[item].price * qty });
+  const total = MERCH[item].price && MERCH[item].price * qty;
+  if (item === "tee" && MOONPAY) {
+    const statusToken = randomBytes(32).toString("base64url");
+    order.payment_amount = String(BigInt(total * 100) * 10_000n);
+    startPayment.run(total * 100, order.payment_amount, USD_ID, statusToken, order.id);
+    try {
+      const charge = await MOONPAY.createCharge(order);
+      attachCharge.run(charge.token, charge.id, charge.checkoutUrl, charge.expiresAt, order.id);
+      scheduleBackup();
+      return json(res, 201, { ok: true, id: order.id, item, size, qty, total,
+        payment: { checkoutUrl: charge.checkoutUrl, statusToken, status: "awaiting_payment" } });
+    } catch {
+      paymentStatus.run("payment_failed", order.id);
+      scheduleBackup();
+      return json(res, 502, { error: "Checkout is temporarily unavailable. Please try again." });
+    }
+  }
+  json(res, 201, { ok: true, id: order.id, item, size, qty, total });
+}
+
+async function reconcilePayment(order) {
+  if (order.status === "paid") return order;
+  if (!MOONPAY || !order.charge_token) throw new Error("Payment verification is unavailable.");
+  const charge = await MOONPAY.getCharge(order.charge_token);
+  const result = validateCharge(charge, order, MOONPAY_CONFIG);
+  if (result.status === "paid") {
+    const used = orderByTransaction.get(result.transactionId);
+    if (used && used.id !== order.id) throw new Error("Payment transaction is already attached to another order.");
+    confirmPayment.run(result.transactionId, result.signature, Date.now(), order.id);
+  } else paymentStatus.run(result.status, order.id);
+  if (result.status !== order.status) scheduleBackup();
+  return orderByStatus.get(order.status_token);
+}
+
+async function merchStatus(req, res) {
+  if (limited(clientIp(req), 90)) return json(res, 429, { error: "Please wait before checking again." });
+  const token = new URL(req.url, "http://x").searchParams.get("token") || "";
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return json(res, 404, { error: "Order not found." });
+  let order = orderByStatus.get(token);
+  if (!order) return json(res, 404, { error: "Order not found." });
+  if (order.status !== "paid" && !MOONPAY) return json(res, 503, { error: "Payment verification is temporarily unavailable." });
+  try { order = await reconcilePayment(order); }
+  catch { return json(res, 502, { error: "Payment status is temporarily unavailable. Please try again." }); }
+  return json(res, 200, { ok: true, status: order.status, item: order.item, size: order.size, qty: order.qty, total: order.total_cents / 100 });
+}
+
+async function moonpayWebhook(req, res) {
+  if (!MOONPAY_CONFIG?.webhookToken) return json(res, 503, { error: "Webhook is not configured." });
+  let raw;
+  try { raw = await readRawBody(req, 128 * 1024); }
+  catch { return json(res, 400, { error: "Invalid request." }); }
+  if (!verifyWebhook(raw, req.headers, MOONPAY_CONFIG.webhookToken)) return json(res, 401, { error: "Invalid signature." });
+  let payload;
+  try { payload = JSON.parse(raw.toString("utf8")); }
+  catch { return json(res, 400, { error: "Invalid request." }); }
+  if (payload.event !== "CREATED" || typeof payload.chargeToken !== "string") return json(res, 200, { ok: true });
+  const order = orderByCharge.get(payload.chargeToken);
+  if (!order) return json(res, 200, { ok: true });
+  // Signed notifications trigger a separate provider lookup; the payload itself never authorizes fulfilment.
+  try { await reconcilePayment(order); }
+  catch { return json(res, 503, { error: "Payment verification unavailable." }); }
+  return json(res, 200, { ok: true });
 }
 
 const MIME = {
@@ -265,6 +352,8 @@ const server = createServer(async (req, res) => {
     }
     if (pathname === "/api/register" && req.method === "POST") return await register(req, res);
     if (pathname === "/api/merch/preorder" && req.method === "POST") return await merchPreorder(req, res);
+    if (pathname === "/api/merch/status" && req.method === "GET") return await merchStatus(req, res);
+    if (pathname === "/api/moonpay/webhook" && req.method === "POST") return await moonpayWebhook(req, res);
     if (pathname.startsWith("/api/")) return json(res, 404, { error: "not found" });
     return await serveStatic(req, res);
   } catch (e) {
@@ -306,4 +395,4 @@ setInterval(() => { for (const c of wss.clients) if (c.readyState === 1) c.ping(
 
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { backup(); db.close(); process.exit(0); });
 
-server.listen(PORT, HOST, () => console.log(`latamacc en http://${HOST}:${PORT}`));
+server.listen(PORT, HOST, () => console.log(`latamacc en http://${HOST}:${server.address().port}`));

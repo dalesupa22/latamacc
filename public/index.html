@@ -41,7 +41,7 @@
     <div class="hero-copy">
       <p class="kicker mono">LATAM/ACC · <span id="clock"></span></p>
       <h1>Latam<br />Accelerationism</h1>
-      <p class="tag">Latam/acc is a directory of AI companies and people building the <b>golden era</b> of our region.</p>
+      <p class="tag">Latam is a directory of AI companies and people that are building the <b>golden era</b> of our region - Register below</p>
       <div class="counters">
         <div><b id="total">0</b><span>in the directory</span></div>
         <div><b id="online">1</b><span>watching now</span></div>
@@ -132,7 +132,7 @@
         <h2>Wear the golden era.</h2>
         <span class="soon mono">Pre-order</span>
       </div>
-      <p class="lead reveal">The first Latam/acc drop, built in public. Black cotton, gold print, made for builders. Pre-order now: no payment today, we email you to confirm.</p>
+      <p class="lead reveal" id="merch-lead">The first Latam/acc drop, built in public. Black cotton, gold print, made for builders. Reserve your merch and we'll email you to confirm.</p>
 
       <svg width="0" height="0" style="position:absolute" aria-hidden="true">
         <defs>
@@ -163,7 +163,7 @@
               <text x="200" y="328" text-anchor="middle" fill="#b99a55" font-family="JetBrains Mono, monospace" font-size="7.5" letter-spacing="1.2">CO · VE · EC · PE · BO · BR · PY · UY · AR · CL · GY · SR</text>
             </svg>
           </div>
-          <div class="drop-info"><b>Golden Era Tee</b><span>Front chest mark · full back print</span><em class="mono">$49 USD</em></div>
+          <div class="drop-info"><b>Golden Era Tee</b><span>100% cotton · black with gold print · front chest mark · full back print</span><em class="mono">$49 USD</em></div>
         </li>
 
 
@@ -185,7 +185,7 @@
 
       <form id="preorder" class="preorder reveal" novalidate>
         <div class="po-head">
-          <b>Pre-order the <span id="po-item">Golden Era Tee</span></b>
+          <b><span id="po-action">Pre-order the</span> <span id="po-item">Golden Era Tee</span></b>
           <span id="po-price" class="mono">$49 USD</span>
         </div>
         <input type="hidden" name="item" value="tee" />
@@ -204,9 +204,19 @@
         </div>
         <input name="hp_field" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
         <div class="ts" data-form="preorder"></div>
+        <p class="payment-note" id="po-note">No payment today. We'll email you to confirm price, shipping and delivery.</p>
         <button class="btn primary big" type="submit" id="po-btn">Pre-order · $49</button>
         <p class="form-msg" id="po-msg" role="status"></p>
       </form>
+      <div id="payment-status" class="payment-status" hidden role="status">
+        <b id="payment-title" tabindex="-1">Your checkout</b>
+        <p id="payment-detail"></p>
+        <div class="payment-actions">
+          <a id="payment-resume" class="btn primary" rel="noopener noreferrer" target="_blank" hidden>Continue to MoonPay</a>
+          <button id="payment-refresh" class="btn" type="button">Check payment</button>
+          <button id="payment-new" class="btn" type="button">Start another order</button>
+        </div>
+      </div>
     </div>
   </section>
 

@@ -240,6 +240,11 @@ h2 { font-size: clamp(30px, 4.6vw, 54px); line-height: 1.04; letter-spacing: -.0
   padding: 11px 12px; font: 15px Inter, sans-serif; outline: none; }
 .po-fields input:focus, .po-fields select:focus { border-color: var(--fire); box-shadow: 0 0 0 3px rgba(240,200,110,.15); }
 .preorder .form-msg:empty { display: none; }
+.payment-note { color: var(--mute); font-size: 13px; }
+.payment-status { margin-top: 24px; max-width: 740px; padding: 20px; border: 1px solid var(--fire); border-radius: 16px; background: var(--card); }
+.payment-status b { color: var(--fire2); font-size: 18px; }
+.payment-status p { margin-top: 10px; color: var(--mute); }
+.payment-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
 .ts:empty { display: none; }
 @media (max-width: 700px) { .po-fields { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 600px) { .drops { grid-template-columns: 1fr; } }

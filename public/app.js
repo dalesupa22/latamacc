@@ -545,16 +545,77 @@ function guarded(data, form) {
 }
 function resetGuard(form) { const w = guard.widgets[form]; if (w !== undefined && window.turnstile) turnstile.reset(w); }
 
-// ---------- merch (preventa) ----------
+// ---------- merch y checkout ----------
 const po = $("#preorder");
+const merchPayments = { tee: false, cap: false };
+let pendingPayment = null, checkingPayment = false;
+try { pendingPayment = JSON.parse(sessionStorage.getItem("latamacc-checkout") || "null"); } catch {}
 const ITEMS = {
   tee: { name: "Golden Era Tee", price: 49, sizes: ["S", "M", "L", "XL", "XXL"] },
   cap: { name: "Signal Cap", price: null, sizes: ["ONE"] },
 };
 function poButton() {
   const it = ITEMS[po.item.value], q = Math.min(10, Math.max(1, Math.trunc(Number(po.qty.value)) || 1));
-  $("#po-btn").textContent = it.price ? `Pre-order · $${it.price * q}` : "Pre-order · price by email";
+  const pays = merchPayments[po.item.value];
+  $("#po-action").textContent = pays ? "Order the" : "Pre-order the";
+  $("#po-btn").textContent = pays ? `Continue to MoonPay · $${it.price * q}` : it.price ? `Pre-order · $${it.price * q}` : "Pre-order · price by email";
+  $("#po-note").textContent = pays
+    ? "Pre-order merchandise total in USD. Shipping and delivery are confirmed by email. Your order details are shared with MoonPay for checkout; your delivery address and any payment fees are shown there."
+    : "No payment today. We'll email you to confirm price, shipping and delivery.";
 }
+
+function checkoutUrl(value) {
+  try {
+    const u = new URL(value);
+    return u.protocol === "https:" && ["moonpay.hel.io", "pay.hel.io", "app.hel.io", "hel.io"].includes(u.hostname) && (!u.port || u.port === "443") && !u.username && !u.password ? u.href : null;
+  } catch { return null; }
+}
+function savePayment(value) {
+  pendingPayment = value;
+  try {
+    if (value) sessionStorage.setItem("latamacc-checkout", JSON.stringify(value));
+    else sessionStorage.removeItem("latamacc-checkout");
+    return true;
+  } catch { return false; }
+}
+function showPayment(status = pendingPayment?.status || "awaiting_payment") {
+  if (!pendingPayment) return;
+  const paid = status === "paid", expired = status === "expired", failed = status === "payment_failed";
+  const opened = $("#payment-status").hidden;
+  $("#payment-status").hidden = false;
+  $("#payment-title").textContent = paid ? "Payment confirmed ✦" : expired ? "Checkout expired" : failed ? "Payment could not be completed" : "Your order is awaiting payment";
+  const it = ITEMS[pendingPayment.item];
+  $("#payment-detail").textContent = `${pendingPayment.qty} × ${it?.name || "Merch"} (${pendingPayment.size}) · $${pendingPayment.total} USD. `
+    + (paid ? "We'll email you to confirm shipping and delivery." : expired || failed ? "Start another order to get a fresh checkout." : "Complete checkout in MoonPay, then check your payment here. A reservation is confirmed as paid only after payment verification.");
+  const url = checkoutUrl(pendingPayment.checkoutUrl);
+  $("#payment-resume").hidden = !url || paid || expired || failed;
+  if (url) $("#payment-resume").href = url;
+  $("#payment-refresh").hidden = paid || expired || failed;
+  po.hidden = true;
+  if (opened) $("#payment-title").focus();
+}
+async function checkPayment() {
+  if (!pendingPayment?.statusToken || checkingPayment) return;
+  checkingPayment = true;
+  $("#payment-refresh").disabled = true;
+  try {
+    const r = await fetch(`/api/merch/status?token=${encodeURIComponent(pendingPayment.statusToken)}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "Could not verify payment. Please try again.");
+    if (!["awaiting_payment", "paid", "expired", "payment_failed"].includes(j.status)) throw new Error("Could not verify payment. Please try again.");
+    savePayment({ ...pendingPayment, status: j.status, item: j.item, size: j.size, qty: j.qty, total: j.total });
+    showPayment(j.status);
+  } catch (err) {
+    $("#payment-detail").textContent = err.message;
+  } finally { checkingPayment = false; $("#payment-refresh").disabled = false; }
+}
+$("#payment-refresh").addEventListener("click", checkPayment);
+$("#payment-new").addEventListener("click", () => {
+  if (checkingPayment) return;
+  savePayment(null); $("#payment-status").hidden = true; po.hidden = false;
+  $("#po-msg").textContent = "";
+  po.email.focus();
+});
 function pickItem(li) {
   const key = li.dataset.item, it = ITEMS[key];
   document.querySelectorAll(".drop").forEach(d => d.classList.toggle("picked", d === li));
@@ -586,17 +647,27 @@ po.addEventListener("submit", async e => {
   msg.className = "form-msg"; msg.textContent = "";
   if (!data.email.includes("@") || !data.country) { msg.className = "form-msg err"; msg.textContent = "Please add your email and shipping country."; return; }
   btn.disabled = true;
+  btn.textContent = merchPayments[data.item] ? "Preparing checkout…" : "Reserving…";
   try {
     const r = await fetch("/api/merch/preorder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(guarded(data, "preorder")) });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || "Could not pre-order.");
+    if (j.payment) {
+      const url = checkoutUrl(j.payment.checkoutUrl);
+      if (!url || !j.payment.statusToken) throw new Error("Checkout is unavailable. Please try again.");
+      const saved = savePayment({ statusToken: j.payment.statusToken, checkoutUrl: url, status: "awaiting_payment", item: j.item, size: j.size, qty: j.qty, total: j.total });
+      showPayment();
+      if (saved) location.assign(url);
+      else $("#payment-detail").textContent += " Keep this page open and use Continue to MoonPay in a new tab so you can check your payment here.";
+      return;
+    }
     const it = ITEMS[data.item];
     msg.className = "form-msg ok";
     msg.textContent = `Pre-ordered ✦ ${data.qty} × ${it.name}${data.size !== "ONE" ? ` (${data.size})` : ""}${j.total ? ` · $${j.total} USD` : ""}. We'll email you to confirm payment and shipping.`;
     po.email.value = ""; po.name.value = ""; po.qty.value = 1; poButton();
   } catch (err) {
     msg.className = "form-msg err"; msg.textContent = err.message;
-  } finally { btn.disabled = false; resetGuard("preorder"); }
+  } finally { btn.disabled = false; poButton(); resetGuard("preorder"); }
 });
 
 // ---------- arranque ----------
@@ -629,6 +700,11 @@ addEventListener("resize", layout);
   S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => psel.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));
   if (state.you && S.byCode[state.you]) { if (!sel.value) sel.value = state.you; psel.value = state.you; }
   guard.ft = state.ft || ""; guard.sitekey = state.turnstile; loadTurnstile();
+  Object.assign(merchPayments, state.merchPayments || {}); poButton();
+  if (merchPayments.tee) {
+    $("#merch-lead").textContent = "The first Latam/acc drop, built in public. Black cotton, gold print, made for builders. Pre-order the tee with MoonPay. Reserve the cap and we'll email you its price.";
+  }
+  if (pendingPayment?.statusToken) { showPayment(); checkPayment(); }
   // los miembros existentes se encienden en cascada cuando termina el dorado
   const base = START + BURN;
   state.points.slice().reverse().forEach((b, i, arr) => {
