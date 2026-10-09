@@ -483,9 +483,9 @@ $("#country-chips").addEventListener("click", e => {
 const form = $("#form");
 function syncKind() {
   const company = form.kind.value === "company";
-  $("#name-label").textContent = company ? "Company name" : "Full name";
-  form.name.placeholder = company ? "Acme AI" : "Ana Pérez";
-  form.name.autocomplete = company ? "organization" : "name";
+  $("#name-label").textContent = company ? "Company name" : "Your name or username";
+  form.name.placeholder = company ? "Acme AI" : "Ana Pérez or @ana";
+  form.name.autocomplete = company ? "organization" : "nickname";
   $("#building-label").textContent = company ? "What does the company build?" : "What are you building?";
   form.querySelector(".person-only").hidden = company;
 }
@@ -525,6 +525,31 @@ function showDone(b, existing) {
 }
 $("#done-again").addEventListener("click", () => { $("#done").hidden = true; form.hidden = false; $("#form-msg").textContent = ""; });
 
+// ---------- merch ----------
+const merch = $("#merch-form");
+merch.addEventListener("input", () => {
+  const q = Math.min(10, Math.max(1, Math.trunc(Number(merch.qty.value)) || 1));
+  $("#merch-submit").textContent = `Reserve yours · $${49 * q}`;
+});
+merch.addEventListener("submit", async e => {
+  e.preventDefault();
+  const msg = $("#merch-msg"), btn = $("#merch-submit");
+  const data = Object.fromEntries(new FormData(merch));
+  msg.className = "form-msg"; msg.textContent = "";
+  if (!data.email.includes("@") || !data.country) { msg.className = "form-msg err"; msg.textContent = "Please add your email and shipping country."; return; }
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/merch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "Could not reserve.");
+    msg.className = "form-msg ok";
+    msg.textContent = `Reserved ✦ ${data.qty} × ${data.size} ($${j.total} USD). We'll email you to confirm payment and shipping.`;
+    merch.reset(); merch.dispatchEvent(new Event("input"));
+  } catch (err) {
+    msg.className = "form-msg err"; msg.textContent = err.message;
+  } finally { btn.disabled = false; }
+});
+
 // ---------- arranque ----------
 const io = new IntersectionObserver(es => es.forEach(e => {
   if (!e.isIntersecting) return;
@@ -551,7 +576,9 @@ addEventListener("resize", layout);
 
   S.total = state.total; S.byCountry = state.byCountry; S.recent = state.recent; S.watching = state.watching || {};
   setOnline(state.online || 1);
-  if (state.you && S.byCode[state.you] && !sel.value) sel.value = state.you;
+  const msel = $("#merch-country");
+  S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => msel.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));
+  if (state.you && S.byCode[state.you]) { if (!sel.value) sel.value = state.you; msel.value = state.you; }
   // los miembros existentes se encienden en cascada cuando termina el dorado
   const base = START + BURN;
   state.points.slice().reverse().forEach((b, i, arr) => {

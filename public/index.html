@@ -30,6 +30,7 @@
       <div class="nav-r">
         <span class="live mono"><i></i><b id="nav-online">1</b> live</span>
         <a class="hide-sm" href="#directory">Directory</a>
+        <a class="hide-sm" href="#merch">Merch</a>
         <a class="pill" href="#join">Join the directory</a>
       </div>
     </div>
@@ -68,7 +69,7 @@
             <label><input type="radio" name="kind" value="company" /> <span>Company</span></label>
           </div>
           <div class="row">
-            <label><span id="name-label">Full name</span><input name="name" required maxlength="60" autocomplete="name" placeholder="Ana Pérez" /></label>
+            <label><span id="name-label">Your name or username</span><input name="name" required maxlength="60" autocomplete="nickname" placeholder="Ana Pérez or @ana" /></label>
             <label><span>Email <span class="opt">(private)</span></span><input name="email" type="email" required maxlength="120" autocomplete="email" placeholder="ana@startup.ai" /></label>
           </div>
           <label class="person-only"><span>Company <span class="opt">(optional)</span></span><input name="company" maxlength="80" autocomplete="organization" placeholder="Where you build" /></label>
@@ -120,6 +121,51 @@
       </div>
       <ul id="country-chips" class="chips reveal"></ul>
       <ul id="dir" class="dir"></ul>
+    </div>
+  </section>
+
+  <section id="merch" class="merch">
+    <div class="wrap merch-grid">
+      <div class="tee reveal" aria-hidden="true">
+        <svg viewBox="0 0 400 420" class="tee-svg">
+          <defs>
+            <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff3c9"/><stop offset=".5" stop-color="#e9c063"/><stop offset="1" stop-color="#a8781f"/></linearGradient>
+            <radialGradient id="shine" cx=".5" cy=".3" r=".7"><stop offset="0" stop-color="#2a2620"/><stop offset="1" stop-color="#0b0a09"/></radialGradient>
+          </defs>
+          <path d="M130 30 Q200 70 270 30 L370 80 L340 160 L300 145 L300 400 L100 400 L100 145 L60 160 L30 80 Z" fill="url(#shine)" stroke="#2c2722" stroke-width="2"/>
+          <path d="M130 30 Q200 70 270 30" fill="none" stroke="#3a342c" stroke-width="6"/>
+          <image href="/assets/mark.png" x="150" y="140" width="44" height="44"/>
+          <text x="202" y="160" fill="url(#gold)" font-family="Inter, sans-serif" font-weight="700" font-size="17">Latam</text>
+          <text x="202" y="180" fill="url(#gold)" font-family="Inter, sans-serif" font-weight="700" font-size="17">Accelerationism</text>
+        </svg>
+      </div>
+      <div>
+        <p class="kicker mono reveal">03 — Merch</p>
+        <h2 class="reveal">Wear the golden era.</h2>
+        <p class="lead reveal">The Latam/acc tee. Black, heavyweight cotton, gold print.</p>
+        <p class="price reveal"><b>$49</b> <span>USD</span></p>
+        <form id="merch-form" class="form reveal" novalidate>
+          <div class="seg sizes" role="radiogroup" aria-label="Size">
+            <label><input type="radio" name="size" value="S" /> <span>S</span></label>
+            <label><input type="radio" name="size" value="M" checked /> <span>M</span></label>
+            <label><input type="radio" name="size" value="L" /> <span>L</span></label>
+            <label><input type="radio" name="size" value="XL" /> <span>XL</span></label>
+            <label><input type="radio" name="size" value="XXL" /> <span>XXL</span></label>
+          </div>
+          <div class="row">
+            <label>Email<input name="email" type="email" required maxlength="120" autocomplete="email" placeholder="you@startup.ai" /></label>
+            <label>Ship to<select name="country" id="merch-country" required><option value="">Country</option></select></label>
+          </div>
+          <div class="row">
+            <label><span>Name <span class="opt">(optional)</span></span><input name="name" maxlength="60" autocomplete="name" /></label>
+            <label>Quantity<input name="qty" type="number" min="1" max="10" value="1" required /></label>
+          </div>
+          <input name="hp_field" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
+          <button class="btn primary big" type="submit" id="merch-submit">Reserve yours · $49</button>
+          <p class="fine">No payment now. We'll email you to confirm payment and shipping.</p>
+          <p class="form-msg" id="merch-msg" role="status"></p>
+        </form>
+      </div>
     </div>
   </section>
 

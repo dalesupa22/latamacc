@@ -40,19 +40,26 @@ const numberQ = db.prepare(`SELECT rowid AS n FROM builders WHERE id = ?`);
 const pointsQ = db.prepare(`SELECT id, country, created_at FROM builders ORDER BY created_at DESC LIMIT 5000`);
 const countsQ = db.prepare(`SELECT country, COUNT(*) n FROM builders GROUP BY country`);
 const totalQ = db.prepare(`SELECT COUNT(*) n FROM builders`);
+// Pedidos de merch: lista de reservas, sin cobro (el pago se coordina por correo).
+db.exec(`CREATE TABLE IF NOT EXISTS merch_orders (
+  id TEXT PRIMARY KEY, item TEXT NOT NULL, size TEXT NOT NULL, qty INTEGER NOT NULL, name TEXT, email TEXT NOT NULL,
+  country TEXT, ip TEXT, created_at INTEGER NOT NULL)`);
+const insertOrder = db.prepare(`INSERT INTO merch_orders (id,item,size,qty,name,email,country,ip,created_at) VALUES (?,?,?,?,?,?,?,?,?)`);
+const ordersQ = db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(qty),0) units FROM merch_orders`);
+const MERCH = { item: "latamacc-tee", price: 49, sizes: ["S", "M", "L", "XL", "XXL"] };
 for (const f of [DB_FILE, DB_FILE + "-wal", DB_FILE + "-shm"]) { try { chmodSync(f, 0o600); } catch {} }
 
 // Copias de seguridad: una al arrancar y cada hora si hubo registros nuevos; se guardan las últimas 72.
-let lastBackup = null, lastBackupTotal = -1;
+let lastBackup = null, lastBackupTotal = "";
 function backup() {
-  const total = totalQ.get().n;
+  const total = `${totalQ.get().n}/${ordersQ.get().n}`;
   if (total === lastBackupTotal) return;
   const stamp = new Date().toISOString().replace(/[-:.]/g, "").slice(0, 18);
   const file = join(BACKUPS, `latamacc-${stamp}.db`);
   try {
     db.exec(`VACUUM INTO '${file}'`);
     chmodSync(file, 0o600);
-    lastBackup = { file, at: Date.now(), builders: total };
+    lastBackup = { file, at: Date.now(), builders: totalQ.get().n, orders: ordersQ.get().n };
     lastBackupTotal = total;
     const all = readdirSync(BACKUPS).filter(f => f.endsWith(".db")).sort();
     for (const old of all.slice(0, -72)) rmSync(join(BACKUPS, old));
@@ -60,6 +67,9 @@ function backup() {
 }
 backup();
 setInterval(backup, 60 * 60_000);
+// Además, respaldo 30 s después de cada escritura (agrupa ráfagas de registros).
+let backupSoon;
+const scheduleBackup = () => { clearTimeout(backupSoon); backupSoon = setTimeout(backup, 30_000); };
 
 // Es un directorio público: el formulario avisa qué se publica. El correo nunca sale del servidor.
 function publicView(r) {
@@ -86,7 +96,7 @@ function presence() {
 
 function health() {
   return { ok: true, builders: totalQ.get().n, dbBytes: statSync(DB_FILE).size, journal: db.prepare("PRAGMA journal_mode").get().journal_mode,
-    lastBackup: lastBackup && { at: new Date(lastBackup.at).toISOString(), builders: lastBackup.builders }, online: wss.clients.size };
+    lastBackup: lastBackup && { at: new Date(lastBackup.at).toISOString(), builders: lastBackup.builders, orders: lastBackup.orders }, orders: ordersQ.get().n, online: wss.clients.size };
 }
 
 const clean = (v, max) => (typeof v === "string" ? v.replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, max) : "");
@@ -142,7 +152,27 @@ async function register(req, res) {
   insert.run(row.id, row.kind, row.name, row.company, row.email, row.country, row.city, row.building, row.website, row.handle, row.ip, row.created_at);
   const pub = publicView({ ...row, n: numberQ.get(row.id).n });
   broadcast({ type: "join", builder: pub, total: totalQ.get().n });
+  scheduleBackup();
   json(res, 201, { ok: true, builder: pub });
+}
+
+async function merchOrder(req, res) {
+  const ip = clientIp(req);
+  if (limited(ip)) return json(res, 429, { error: "Too many attempts, please wait a minute." });
+  let b;
+  try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
+  if (b.hp_field) return json(res, 200, { ok: true }); // honeypot
+  const email = clean(b.email, 120).toLowerCase();
+  const size = clean(b.size, 4).toUpperCase();
+  const qty = Math.trunc(Number(b.qty));
+  const country = clean(b.country, 2).toUpperCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { error: "Invalid email." });
+  if (!MERCH.sizes.includes(size)) return json(res, 400, { error: "Pick a size." });
+  if (!(qty >= 1 && qty <= 10)) return json(res, 400, { error: "Quantity must be 1 to 10." });
+  if (!COUNTRIES.has(country)) return json(res, 400, { error: "Pick a Latam country for shipping." });
+  insertOrder.run(randomUUID(), MERCH.item, size, qty, clean(b.name, 60), email, country, ip, Date.now());
+  scheduleBackup();
+  json(res, 201, { ok: true, total: MERCH.price * qty });
 }
 
 const MIME = {
@@ -195,6 +225,7 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { entries: rows.map(publicView) });
     }
     if (pathname === "/api/register" && req.method === "POST") return await register(req, res);
+    if (pathname === "/api/merch" && req.method === "POST") return await merchOrder(req, res);
     if (pathname.startsWith("/api/")) return json(res, 404, { error: "not found" });
     return await serveStatic(req, res);
   } catch (e) {

@@ -200,3 +200,16 @@ h2 { font-size: clamp(30px, 4.6vw, 54px); line-height: 1.04; letter-spacing: -.0
 .card-foot .links { display: flex; gap: 10px; }
 .card-foot a { color: var(--fire2); text-decoration: none; }
 .foot a { color: var(--fire2); text-decoration: none; }
+
+/* merch */
+.merch { background: radial-gradient(50% 60% at 25% 50%, rgba(230,190,90,.08), transparent 70%); }
+.merch-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: 56px; align-items: center; }
+.tee { position: relative; display: grid; place-items: center; }
+.tee::before { content: ""; position: absolute; inset: 10% 15%; border-radius: 50%; background: radial-gradient(rgba(240,200,110,.22), transparent 70%); filter: blur(30px); }
+.tee-svg { position: relative; width: 100%; max-width: 420px; height: auto; filter: drop-shadow(0 30px 60px rgba(0,0,0,.8)); transition: transform .6s; }
+.tee:hover .tee-svg { transform: rotate(-2deg) scale(1.02); }
+.price { margin-top: 18px; display: flex; align-items: baseline; gap: 8px; }
+.price b { font-size: 44px; letter-spacing: -.03em; background: linear-gradient(180deg, #fffbe9, #f0cd73 55%, #a8781f); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.price span { color: var(--mute); font-size: 14px; }
+.seg.sizes span { min-width: 44px; text-align: center; padding: 8px 12px; }
+@media (max-width: 900px) { .merch-grid { grid-template-columns: 1fr; gap: 28px; } .tee-svg { max-width: 300px; } }
