@@ -13,6 +13,12 @@ Sitio de **Latam Accelerationism (Latam/acc)**, en inglés: directorio de empres
 - Estado: `curl https://latamacc.si/api/health` (solo conteos).
 - Exportar con correos (solo en local): `node scripts/export.mjs > builders.csv`.
 
+## Anti-bots y merch
+
+- Cada formulario lleva un token firmado (`ft`) que entrega `/api/state`; se rechazan envíos sin token o hechos en menos de 3 s. Además: campo trampa y límite de 20 envíos/min por IP. La clave de firma vive en `data/form-secret`.
+- Turnstile queda listo: crear el widget para `latamacc.si` en Cloudflare y guardar `{"sitekey":"…","secret":"…"}` en `~/.config/latamacc/turnstile.json` (permisos 600, fuera de Git). Al reiniciar el servidor se activa solo en ambos formularios; `/api/health` muestra `turnstile: true`.
+- Preventa de merch (`POST /api/merch/preorder`): Golden Era Tee ($49) y Signal Cap (precio por confirmar). No se cobra; se exporta con `node scripts/export-merch.mjs`.
+
 ## Correr
 
 ```sh

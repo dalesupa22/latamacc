@@ -84,6 +84,7 @@
           </div>
           <input name="hp_field" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
           <p class="fine">Everything except your email is shown publicly in the directory.</p>
+          <div class="ts" data-form="join"></div>
           <button class="btn primary big" type="submit" id="submit">Join the directory</button>
           <p class="form-msg" id="form-msg" role="status"></p>
         </form>
@@ -129,9 +130,9 @@
       <p class="kicker mono reveal">03 — Merch</p>
       <div class="merch-head reveal">
         <h2>Wear the golden era.</h2>
-        <span class="soon mono">Coming soon</span>
+        <span class="soon mono">Pre-order</span>
       </div>
-      <p class="lead reveal">The first Latam/acc drop. Black heavyweight cotton, gold print, made for builders. Get on the list to hear first.</p>
+      <p class="lead reveal">The first Latam/acc drop, built in public. Black cotton, gold print, made for builders. Pre-order now: no payment today, we email you to confirm.</p>
 
       <svg width="0" height="0" style="position:absolute" aria-hidden="true">
         <defs>
@@ -165,21 +166,6 @@
           <div class="drop-info"><b>Golden Era Tee</b><span>Front chest mark · full back print</span><em class="mono">$49 USD</em></div>
         </li>
 
-        <li class="drop reveal" data-item="hoodie" tabindex="0">
-          <div class="stage">
-            <svg viewBox="0 0 400 440" class="face">
-              <path d="M150 74 Q200 18 250 74 L322 96 L372 268 L336 280 L302 176 L302 412 Q200 422 98 412 L98 176 L64 280 L28 268 L78 96 Z" fill="url(#cloth)" stroke="#2c2722" stroke-width="2"/>
-              <path d="M150 74 Q200 120 250 74 Q238 40 200 36 Q162 40 150 74 Z" fill="#0a0908" stroke="#3a342c" stroke-width="3"/>
-              <path d="M186 104 L182 160 M214 104 L218 160" stroke="#c9a24f" stroke-width="2.5" stroke-linecap="round"/>
-              <circle cx="182" cy="162" r="3" fill="#e9c063"/><circle cx="218" cy="162" r="3" fill="#e9c063"/>
-              <text x="200" y="208" text-anchor="middle" fill="url(#gold)" font-family="Inter, sans-serif" font-weight="800" font-size="25" letter-spacing="-1">Latam</text>
-              <text x="200" y="236" text-anchor="middle" fill="url(#gold)" font-family="Inter, sans-serif" font-weight="800" font-size="25" letter-spacing="-1">Accelerationism</text>
-              <path d="M138 312 L262 312 L278 392 L122 392 Z" fill="none" stroke="#2f2a24" stroke-width="3"/>
-              <path d="M98 398 Q200 408 302 398" stroke="#2f2a24" stroke-width="10" fill="none"/>
-            </svg>
-          </div>
-          <div class="drop-info"><b>Accelerationist Hoodie</b><span>Heavyweight fleece · chest wordmark</span><em class="mono">Coming soon</em></div>
-        </li>
 
         <li class="drop reveal" data-item="cap" tabindex="0">
           <div class="stage">
@@ -192,33 +178,34 @@
               <image href="/assets/mark.png" x="168" y="158" width="64" height="64" filter="url(#goldify)"/>
             </svg>
           </div>
-          <div class="drop-info"><b>Signal Cap</b><span>Embroidered gold mark · adjustable</span><em class="mono">Coming soon</em></div>
+          <div class="drop-info"><b>Signal Cap</b><span>Cotton · embroidered gold mark · adjustable</span><em class="mono">Price soon</em></div>
         </li>
 
-        <li class="drop reveal" data-item="tote" tabindex="0">
-          <div class="stage">
-            <svg viewBox="0 0 400 440" class="face">
-              <path d="M150 156 Q150 56 200 56 Q250 56 250 156" fill="none" stroke="#bdb29a" stroke-width="12"/>
-              <path d="M92 150 L308 150 L320 414 L80 414 Z" fill="url(#canvas)" stroke="#a89c82" stroke-width="2"/>
-              <image href="/assets/mark.png" x="160" y="200" width="80" height="80" filter="url(#inkify)"/>
-              <text x="200" y="316" text-anchor="middle" fill="#14120f" font-family="Inter, sans-serif" font-weight="800" font-size="24" letter-spacing="-.5">BUILT IN LATAM</text>
-              <text x="200" y="338" text-anchor="middle" fill="#4b4436" font-family="JetBrains Mono, monospace" font-size="9" letter-spacing="2.5">LATAMACC.SI</text>
-            </svg>
-          </div>
-          <div class="drop-info"><b>Builder Tote</b><span>Natural canvas · ink print</span><em class="mono">Coming soon</em></div>
-        </li>
       </ul>
 
-      <form id="notify" class="notify reveal" novalidate>
-        <div>
-          <b>Get first dibs on the drop.</b>
-          <span>Pick your favorite above and we'll email you when it's live.</span>
+      <form id="preorder" class="preorder reveal" novalidate>
+        <div class="po-head">
+          <b>Pre-order the <span id="po-item">Golden Era Tee</span></b>
+          <span id="po-price" class="mono">$49 USD</span>
         </div>
-        <input name="email" type="email" required maxlength="120" autocomplete="email" placeholder="you@startup.ai" aria-label="Email" />
         <input type="hidden" name="item" value="tee" />
+        <div class="seg sizes" role="radiogroup" aria-label="Size" id="po-sizes">
+          <label><input type="radio" name="size" value="S" /> <span>S</span></label>
+          <label><input type="radio" name="size" value="M" checked /> <span>M</span></label>
+          <label><input type="radio" name="size" value="L" /> <span>L</span></label>
+          <label><input type="radio" name="size" value="XL" /> <span>XL</span></label>
+          <label><input type="radio" name="size" value="XXL" /> <span>XXL</span></label>
+        </div>
+        <div class="po-fields">
+          <input name="email" type="email" required maxlength="120" autocomplete="email" placeholder="you@startup.ai" aria-label="Email" />
+          <select name="country" id="po-country" required aria-label="Ship to"><option value="">Ship to</option></select>
+          <input name="qty" type="number" min="1" max="10" value="1" required aria-label="Quantity" />
+          <input name="name" maxlength="60" autocomplete="name" placeholder="Name (optional)" aria-label="Name" />
+        </div>
         <input name="hp_field" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
-        <button class="btn primary" type="submit" id="notify-btn">Notify me · <span id="notify-item">Tee</span></button>
-        <p class="form-msg" id="notify-msg" role="status"></p>
+        <div class="ts" data-form="preorder"></div>
+        <button class="btn primary big" type="submit" id="po-btn">Pre-order · $49</button>
+        <p class="form-msg" id="po-msg" role="status"></p>
       </form>
     </div>
   </section>

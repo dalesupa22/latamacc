@@ -207,7 +207,7 @@ h2 { font-size: clamp(30px, 4.6vw, 54px); line-height: 1.04; letter-spacing: -.0
 .soon { font-size: 12px; text-transform: uppercase; letter-spacing: .12em; padding: 6px 12px; border-radius: 999px; color: #1a1204;
   background: linear-gradient(135deg, #fff1c2, #e9c063 45%, #b8862b); box-shadow: 0 0 24px rgba(240,200,110,.35); animation: glowp 2.4s ease-in-out infinite; }
 @keyframes glowp { 50% { box-shadow: 0 0 40px rgba(240,200,110,.6); } }
-.drops { list-style: none; margin-top: 40px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; perspective: 1000px; }
+.drops { list-style: none; margin-top: 40px; display: grid; grid-template-columns: repeat(2, minmax(0, 360px)); gap: 20px; perspective: 1000px; }
 .drop { --rx: 0deg; --ry: 0deg; --gx: 50%; --gy: 30%; position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 18px;
   padding: 14px 14px 18px; cursor: pointer; outline: none; transform: rotateX(var(--rx)) rotateY(var(--ry)); transform-style: preserve-3d;
   transition: transform .25s ease, border-color .3s, box-shadow .3s; overflow: hidden; }
@@ -216,7 +216,7 @@ h2 { font-size: clamp(30px, 4.6vw, 54px); line-height: 1.04; letter-spacing: -.0
 .drop:hover::before, .drop:focus-visible::before { opacity: 1; }
 .drop:hover, .drop:focus-visible { border-color: rgba(240,200,110,.45); box-shadow: 0 20px 60px rgba(230,190,90,.1); }
 .drop.picked { border-color: var(--fire2); box-shadow: 0 0 0 1px var(--fire2), 0 20px 60px rgba(230,190,90,.15); }
-.drop::after { content: "Coming soon"; position: absolute; top: 14px; right: 14px; font: 500 10px "JetBrains Mono", monospace; letter-spacing: .08em;
+.drop::after { content: "Pre-order"; position: absolute; top: 14px; right: 14px; font: 500 10px "JetBrains Mono", monospace; letter-spacing: .08em;
   text-transform: uppercase; color: var(--fire2); border: 1px solid rgba(240,200,110,.4); border-radius: 999px; padding: 3px 8px; background: rgba(0,0,0,.5); }
 .stage { position: relative; aspect-ratio: 400 / 440; }
 .stage .face { position: absolute; inset: 0; width: 100%; height: 100%; filter: drop-shadow(0 20px 30px rgba(0,0,0,.7)); transition: opacity .5s, transform .6s; }
@@ -230,15 +230,16 @@ h2 { font-size: clamp(30px, 4.6vw, 54px); line-height: 1.04; letter-spacing: -.0
 .drop-info b { font-size: 16px; }
 .drop-info span { color: var(--mute); font-size: 13px; }
 .drop-info em { font-style: normal; color: var(--fire2); font-size: 12px; margin-top: 4px; }
-.notify { margin-top: 28px; display: grid; grid-template-columns: 1.3fr 1fr auto; gap: 12px; align-items: center; padding: 18px;
-  border: 1px solid rgba(240,200,110,.3); border-radius: 16px; background: linear-gradient(90deg, rgba(240,200,110,.07), transparent 60%); }
-.notify div { display: grid; gap: 2px; }
-.notify div span { color: var(--mute); font-size: 13px; }
-.notify input[type=email] { background: var(--card); border: 1px solid #332e29; color: var(--fg); border-radius: 999px; padding: 12px 18px;
-  font: 15px Inter, sans-serif; outline: none; min-width: 0; }
-.notify input[type=email]:focus { border-color: var(--fire); box-shadow: 0 0 0 3px rgba(240,200,110,.15); }
-.notify .form-msg { grid-column: 1 / -1; margin: 0; }
-.notify .form-msg:empty { display: none; }
-@media (max-width: 1000px) { .drops { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 700px) { .notify { grid-template-columns: 1fr; } }
-@media (max-width: 420px) { .drops { grid-template-columns: 1fr; } }
+.preorder { margin-top: 24px; max-width: 740px; display: grid; gap: 14px; padding: 20px; border: 1px solid rgba(240,200,110,.3); border-radius: 16px;
+  background: linear-gradient(90deg, rgba(240,200,110,.07), transparent 70%); }
+.po-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.po-head b { font-size: 18px; }
+.po-head span { color: var(--fire2); }
+.po-fields { display: grid; grid-template-columns: 1.4fr 1fr 80px 1fr; gap: 10px; }
+.po-fields input, .po-fields select { width: 100%; min-width: 0; background: var(--card); border: 1px solid #332e29; color: var(--fg); border-radius: 10px;
+  padding: 11px 12px; font: 15px Inter, sans-serif; outline: none; }
+.po-fields input:focus, .po-fields select:focus { border-color: var(--fire); box-shadow: 0 0 0 3px rgba(240,200,110,.15); }
+.preorder .form-msg:empty { display: none; }
+.ts:empty { display: none; }
+@media (max-width: 700px) { .po-fields { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 600px) { .drops { grid-template-columns: 1fr; } }

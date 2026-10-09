@@ -499,7 +499,7 @@ form.addEventListener("submit", async e => {
   if (!data.name.trim() || !data.email.includes("@") || !data.country) { msg.className = "form-msg err"; msg.textContent = "Please add a name, email and country."; return; }
   btn.disabled = true; btn.textContent = "Joining…";
   try {
-    const r = await fetch("/api/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+    const r = await fetch("/api/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(guarded(data, "join")) });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || "Could not register.");
     showDone(j.builder, j.existing);
@@ -512,7 +512,7 @@ form.addEventListener("submit", async e => {
   } catch (err) {
     msg.className = "form-msg err"; msg.textContent = err.message;
   } finally {
-    btn.disabled = false; btn.textContent = "Join the directory";
+    btn.disabled = false; btn.textContent = "Join the directory"; resetGuard("join");
   }
 });
 
@@ -525,13 +525,44 @@ function showDone(b, existing) {
 }
 $("#done-again").addEventListener("click", () => { $("#done").hidden = true; form.hidden = false; $("#form-msg").textContent = ""; });
 
-// ---------- merch (coming soon) ----------
-const notify = $("#notify");
-const ITEM_NAMES = { tee: "Tee", hoodie: "Hoodie", cap: "Cap", tote: "Tote" };
+// ---------- anti-bots ----------
+// ft: token firmado del servidor al cargar; Turnstile solo si el servidor tiene clave.
+const guard = { ft: "", sitekey: null, widgets: {} };
+function loadTurnstile() {
+  if (!guard.sitekey) return;
+  window.onTurnstileLoad = () => document.querySelectorAll(".ts").forEach(el => {
+    guard.widgets[el.dataset.form] = turnstile.render(el, { sitekey: guard.sitekey, theme: "dark" });
+  });
+  const sc = document.createElement("script");
+  sc.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad&render=explicit";
+  sc.async = true; document.head.append(sc);
+}
+function guarded(data, form) {
+  data.ft = guard.ft;
+  const w = guard.widgets[form];
+  if (w !== undefined && window.turnstile) data.turnstile = turnstile.getResponse(w) || "";
+  return data;
+}
+function resetGuard(form) { const w = guard.widgets[form]; if (w !== undefined && window.turnstile) turnstile.reset(w); }
+
+// ---------- merch (preventa) ----------
+const po = $("#preorder");
+const ITEMS = {
+  tee: { name: "Golden Era Tee", price: 49, sizes: ["S", "M", "L", "XL", "XXL"] },
+  cap: { name: "Signal Cap", price: null, sizes: ["ONE"] },
+};
+function poButton() {
+  const it = ITEMS[po.item.value], q = Math.min(10, Math.max(1, Math.trunc(Number(po.qty.value)) || 1));
+  $("#po-btn").textContent = it.price ? `Pre-order · $${it.price * q}` : "Pre-order · price by email";
+}
 function pickItem(li) {
+  const key = li.dataset.item, it = ITEMS[key];
   document.querySelectorAll(".drop").forEach(d => d.classList.toggle("picked", d === li));
-  notify.item.value = li.dataset.item;
-  $("#notify-item").textContent = ITEM_NAMES[li.dataset.item];
+  po.item.value = key;
+  $("#po-item").textContent = it.name;
+  $("#po-price").textContent = it.price ? `$${it.price} USD` : "Price soon";
+  $("#po-sizes").innerHTML = it.sizes.map((sz, i) => `<label><input type="radio" name="size" value="${sz}" ${sz === "M" || it.sizes.length === 1 ? "checked" : ""} /> <span>${sz === "ONE" ? "One size" : sz}</span></label>`).join("");
+  poButton();
 }
 document.querySelectorAll(".drop").forEach(li => {
   li.addEventListener("click", () => { pickItem(li); li.querySelector(".flip")?.classList.toggle("turned"); });
@@ -547,22 +578,25 @@ document.querySelectorAll(".drop").forEach(li => {
   li.addEventListener("pointerleave", () => { li.style.setProperty("--rx", "0deg"); li.style.setProperty("--ry", "0deg"); });
 });
 pickItem(document.querySelector(".drop"));
-notify.addEventListener("submit", async e => {
+po.qty.addEventListener("input", poButton);
+po.addEventListener("submit", async e => {
   e.preventDefault();
-  const msg = $("#notify-msg"), btn = $("#notify-btn");
-  const data = Object.fromEntries(new FormData(notify));
+  const msg = $("#po-msg"), btn = $("#po-btn");
+  const data = Object.fromEntries(new FormData(po));
   msg.className = "form-msg"; msg.textContent = "";
-  if (!data.email.includes("@")) { msg.className = "form-msg err"; msg.textContent = "Please add your email."; return; }
+  if (!data.email.includes("@") || !data.country) { msg.className = "form-msg err"; msg.textContent = "Please add your email and shipping country."; return; }
   btn.disabled = true;
   try {
-    const r = await fetch("/api/merch/notify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+    const r = await fetch("/api/merch/preorder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(guarded(data, "preorder")) });
     const j = await r.json();
-    if (!r.ok) throw new Error(j.error || "Could not save.");
-    msg.className = "form-msg ok"; msg.textContent = `You're on the list for the ${ITEM_NAMES[data.item]} ✦ We'll email you when the drop is live.`;
-    notify.email.value = "";
+    if (!r.ok) throw new Error(j.error || "Could not pre-order.");
+    const it = ITEMS[data.item];
+    msg.className = "form-msg ok";
+    msg.textContent = `Pre-ordered ✦ ${data.qty} × ${it.name}${data.size !== "ONE" ? ` (${data.size})` : ""}${j.total ? ` · $${j.total} USD` : ""}. We'll email you to confirm payment and shipping.`;
+    po.email.value = ""; po.name.value = ""; po.qty.value = 1; poButton();
   } catch (err) {
     msg.className = "form-msg err"; msg.textContent = err.message;
-  } finally { btn.disabled = false; }
+  } finally { btn.disabled = false; resetGuard("preorder"); }
 });
 
 // ---------- arranque ----------
@@ -591,7 +625,10 @@ addEventListener("resize", layout);
 
   S.total = state.total; S.byCountry = state.byCountry; S.recent = state.recent; S.watching = state.watching || {};
   setOnline(state.online || 1);
-  if (state.you && S.byCode[state.you] && !sel.value) sel.value = state.you;
+  const psel = $("#po-country");
+  S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => psel.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));
+  if (state.you && S.byCode[state.you]) { if (!sel.value) sel.value = state.you; psel.value = state.you; }
+  guard.ft = state.ft || ""; guard.sitekey = state.turnstile; loadTurnstile();
   // los miembros existentes se encienden en cascada cuando termina el dorado
   const base = START + BURN;
   state.points.slice().reverse().forEach((b, i, arr) => {

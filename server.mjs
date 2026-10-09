@@ -1,9 +1,9 @@
 // Servidor de latamacc.si: estáticos, directorio de builders/empresas de IA y WebSocket en vivo.
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
-import { mkdirSync, readFileSync, readdirSync, rmSync, chmodSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, chmodSync, statSync, existsSync, writeFileSync } from "node:fs";
 import { join, extname, normalize } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { WebSocketServer } from "ws";
 
@@ -40,13 +40,45 @@ const numberQ = db.prepare(`SELECT rowid AS n FROM builders WHERE id = ?`);
 const pointsQ = db.prepare(`SELECT id, country, created_at FROM builders ORDER BY created_at DESC LIMIT 5000`);
 const countsQ = db.prepare(`SELECT country, COUNT(*) n FROM builders GROUP BY country`);
 const totalQ = db.prepare(`SELECT COUNT(*) n FROM builders`);
-// Merch "coming soon": lista de espera por correo y prenda favorita.
-db.exec(`CREATE TABLE IF NOT EXISTS merch_waitlist (
-  email TEXT PRIMARY KEY, item TEXT NOT NULL, ip TEXT, created_at INTEGER NOT NULL)`);
-const insertWait = db.prepare(`INSERT INTO merch_waitlist (email,item,ip,created_at) VALUES (?,?,?,?)
-  ON CONFLICT(email) DO UPDATE SET item = excluded.item`);
-const ordersQ = db.prepare(`SELECT COUNT(*) n FROM merch_waitlist`);
-const MERCH_ITEMS = ["tee", "hoodie", "cap", "tote"];
+// Preventa de merch: se guarda la reserva, sin cobro (el pago se confirma por correo).
+db.exec(`CREATE TABLE IF NOT EXISTS merch_orders (
+  id TEXT PRIMARY KEY, item TEXT NOT NULL, size TEXT NOT NULL, qty INTEGER NOT NULL, name TEXT, email TEXT NOT NULL,
+  country TEXT, ip TEXT, created_at INTEGER NOT NULL)`);
+const insertOrder = db.prepare(`INSERT INTO merch_orders (id,item,size,qty,name,email,country,ip,created_at) VALUES (?,?,?,?,?,?,?,?,?)`);
+const ordersQ = db.prepare(`SELECT COUNT(*) n FROM merch_orders`);
+const MERCH = {
+  tee: { price: 49, sizes: ["S", "M", "L", "XL", "XXL"] },
+  cap: { price: null, sizes: ["ONE"] }, // precio por confirmar
+};
+
+// Anti-bots: token firmado que se entrega al cargar la página. Un envío sin token, o hecho en menos de
+// 3 s, no viene de una persona usando el formulario. Turnstile se suma cuando hay claves configuradas.
+const SECRET_FILE = join(DATA, "form-secret");
+if (!existsSync(SECRET_FILE)) writeFileSync(SECRET_FILE, randomBytes(32).toString("hex"), { mode: 0o600 });
+const FORM_SECRET = readFileSync(SECRET_FILE, "utf8").trim();
+const sign = ts => createHmac("sha256", FORM_SECRET).update(String(ts)).digest("hex").slice(0, 32);
+const formToken = () => { const ts = Date.now(); return `${ts}.${sign(ts)}`; };
+function formTokenOk(token) {
+  const [ts, mac] = String(token || "").split(".");
+  const age = Date.now() - Number(ts);
+  if (!mac || mac.length !== 32 || !(age >= 3000 && age <= 6 * 3600_000)) return false;
+  return timingSafeEqual(Buffer.from(mac), Buffer.from(sign(ts)));
+}
+const TURNSTILE = (() => {
+  const file = process.env.TURNSTILE_FILE || join(process.env.HOME || "", ".config/latamacc/turnstile.json");
+  try { const t = JSON.parse(readFileSync(file, "utf8")); return t.sitekey && t.secret ? t : null; } catch { return null; }
+})();
+async function humanCheck(b, ip) {
+  if (b.hp_field) return "bot";
+  if (!formTokenOk(b.ft)) return "Please reload the page and try again.";
+  if (!TURNSTILE) return null;
+  try {
+    const r = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST", body: new URLSearchParams({ secret: TURNSTILE.secret, response: String(b.turnstile || ""), remoteip: ip }),
+    }).then(r => r.json());
+    return r.success ? null : "Please complete the verification and try again.";
+  } catch { return "Verification is unavailable, please try again."; }
+}
 for (const f of [DB_FILE, DB_FILE + "-wal", DB_FILE + "-shm"]) { try { chmodSync(f, 0o600); } catch {} }
 
 // Copias de seguridad: una al arrancar y cada hora si hubo registros nuevos; se guardan las últimas 72.
@@ -96,7 +128,8 @@ function presence() {
 
 function health() {
   return { ok: true, builders: totalQ.get().n, dbBytes: statSync(DB_FILE).size, journal: db.prepare("PRAGMA journal_mode").get().journal_mode,
-    lastBackup: lastBackup && { at: new Date(lastBackup.at).toISOString(), builders: lastBackup.builders, waitlist: lastBackup.orders }, waitlist: ordersQ.get().n, online: wss.clients.size };
+    lastBackup: lastBackup && { at: new Date(lastBackup.at).toISOString(), builders: lastBackup.builders, preorders: lastBackup.orders }, preorders: ordersQ.get().n,
+    turnstile: !!TURNSTILE, online: wss.clients.size };
 }
 
 const clean = (v, max) => (typeof v === "string" ? v.replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, max) : "");
@@ -128,7 +161,9 @@ async function register(req, res) {
   if (limited(ip)) return json(res, 429, { error: "Too many attempts, please wait a minute." });
   let b;
   try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
-  if (b.hp_field) return json(res, 200, { ok: true }); // honeypot
+  const human = await humanCheck(b, ip);
+  if (human === "bot") return json(res, 200, { ok: true });
+  if (human) return json(res, 400, { error: human });
   const name = clean(b.name, 60);
   const email = clean(b.email, 120).toLowerCase();
   const country = clean(b.country, 2).toUpperCase();
@@ -156,18 +191,27 @@ async function register(req, res) {
   json(res, 201, { ok: true, builder: pub });
 }
 
-async function merchNotify(req, res) {
+async function merchPreorder(req, res) {
   const ip = clientIp(req);
   if (limited(ip)) return json(res, 429, { error: "Too many attempts, please wait a minute." });
   let b;
   try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
-  if (b.hp_field) return json(res, 200, { ok: true }); // honeypot
+  const human = await humanCheck(b, ip);
+  if (human === "bot") return json(res, 200, { ok: true });
+  if (human) return json(res, 400, { error: human });
+  const item = MERCH[b.item] ? b.item : null;
   const email = clean(b.email, 120).toLowerCase();
-  const item = MERCH_ITEMS.includes(b.item) ? b.item : "tee";
+  const size = clean(b.size, 4).toUpperCase();
+  const qty = Math.trunc(Number(b.qty));
+  const country = clean(b.country, 2).toUpperCase();
+  if (!item) return json(res, 400, { error: "Pick the tee or the cap." });
+  if (!MERCH[item].sizes.includes(size)) return json(res, 400, { error: "Pick a size." });
+  if (!(qty >= 1 && qty <= 10)) return json(res, 400, { error: "Quantity must be 1 to 10." });
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { error: "Invalid email." });
-  insertWait.run(email, item, ip, Date.now());
+  if (!COUNTRIES.has(country)) return json(res, 400, { error: "Pick a Latam country for shipping." });
+  insertOrder.run(randomUUID(), item, size, qty, clean(b.name, 60), email, country, ip, Date.now());
   scheduleBackup();
-  json(res, 201, { ok: true });
+  json(res, 201, { ok: true, item, size, qty, total: MERCH[item].price && MERCH[item].price * qty });
 }
 
 const MIME = {
@@ -210,7 +254,7 @@ const server = createServer(async (req, res) => {
     const { pathname } = new URL(req.url, "http://x");
     if (pathname === "/api/state" && req.method === "GET") {
       const you = String(req.headers["cf-ipcountry"] || "").toUpperCase();
-      return json(res, 200, { ...state(), you: COUNTRIES.has(you) ? you : "" });
+      return json(res, 200, { ...state(), you: COUNTRIES.has(you) ? you : "", ft: formToken(), turnstile: TURNSTILE?.sitekey || null });
     }
     if (pathname === "/api/health" && req.method === "GET") return json(res, 200, health());
     if (pathname === "/api/directory" && req.method === "GET") {
@@ -220,7 +264,7 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { entries: rows.map(publicView) });
     }
     if (pathname === "/api/register" && req.method === "POST") return await register(req, res);
-    if (pathname === "/api/merch/notify" && req.method === "POST") return await merchNotify(req, res);
+    if (pathname === "/api/merch/preorder" && req.method === "POST") return await merchPreorder(req, res);
     if (pathname.startsWith("/api/")) return json(res, 404, { error: "not found" });
     return await serveStatic(req, res);
   } catch (e) {
