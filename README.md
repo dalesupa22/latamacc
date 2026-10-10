@@ -49,11 +49,13 @@ npm install
 node server.mjs            # http://127.0.0.1:8790
 ```
 
-## Publicación actual (prueba desde la GPU)
+## Publicación actual (GPU)
 
-- Túnel Cloudflare `latamacc` (id `2881a381-9213-4a60-980f-e15afd766788`, config remota): `latamacc.si` y `www.latamacc.si` → `http://127.0.0.1:8790`.
-- DNS: CNAME proxied `latamacc.si` y `www` → `<id>.cfargotunnel.com`.
-- Conector: `cloudflared tunnel --no-autoupdate run --token-file ~/.local/state/cloudflare-agent/latamacc-tunnel.token`.
-- El servidor y el conector corren en pestañas de terminal; no son servicios persistentes y no sobreviven un reinicio.
+- Túnel Cloudflare `latamacc` (id `2881a381-9213-4a60-980f-e15afd766788`, config remota): `latamacc.si` y `www.latamacc.si` → `http://127.0.0.1:8790`. DNS: CNAME proxied `latamacc.si` y `www` → `<id>.cfargotunnel.com`.
+- Corren como servicios systemd de usuario (linger activo: arrancan con la máquina y se reinician solos si fallan):
+  - `latamacc-web.service`: `node server.mjs` en esta carpeta.
+  - `latamacc-tunnel.service`: `cloudflared tunnel run --token-file ~/.local/state/cloudflare-agent/latamacc-tunnel.token`.
+- Después de cambiar código del servidor: `systemctl --user restart latamacc-web` (SIGTERM respalda la base antes de salir). Estado y logs: `systemctl --user status latamacc-web latamacc-tunnel`, `journalctl --user -u latamacc-web -f`.
+- No lanzar otro `node server.mjs` en el 8790 ni otro conector a mano: chocan con los servicios.
 
 `wrangler.jsonc` queda de la v1 estática y no se usa con el servidor actual.
