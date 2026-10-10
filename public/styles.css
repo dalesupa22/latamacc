@@ -134,6 +134,42 @@ h2 { font-size: clamp(30px, 4.6vw, 54px); line-height: 1.04; letter-spacing: -.0
   section { padding: 80px 0; }
 }
 
+/* panel del país explorado en el mapa */
+.merch[hidden] { display: none; }
+.cpanel { position: absolute; z-index: 6; top: 84px; right: max(20px, calc((100vw - 1180px) / 2 + 20px)); width: 340px;
+  max-height: calc(100% - 120px); display: flex; flex-direction: column; gap: 6px; padding: 20px; border-radius: 16px;
+  background: rgba(12,10,9,.9); border: 1px solid rgba(240,200,110,.4); box-shadow: 0 0 40px rgba(230,190,90,.18);
+  backdrop-filter: blur(8px); animation: slidein .4s ease both; }
+.cpanel[hidden] { display: none; }
+.cpanel .kicker { margin: 0; font-size: 11px; }
+.cpanel h3 { font-size: 24px; letter-spacing: -.02em; color: var(--fire2); }
+.cp-stats { color: var(--mute); font-size: 13px; }
+.cp-close { position: absolute; top: 10px; right: 12px; background: none; border: 0; color: var(--mute); font-size: 24px; cursor: pointer; line-height: 1; padding: 4px 8px; }
+.cp-close:hover { color: var(--fg); }
+.cp-list { list-style: none; overflow-y: auto; margin: 8px -6px 4px; padding: 0 6px; display: grid; gap: 6px; flex: 1; min-height: 0; }
+.cp-list li { display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--card); transition: border-color .2s; }
+.cp-list li.on, .cp-list li:hover { border-color: rgba(240,200,110,.6); }
+.cp-list li.empty { display: block; color: var(--mute); font-size: 14px; border-style: dashed; }
+.cp-list button { all: unset; cursor: pointer; flex: 1; min-width: 0; display: grid; gap: 2px; }
+.cp-list button:focus-visible { outline: 2px solid var(--fire2); outline-offset: 4px; border-radius: 6px; }
+.cp-list b { font-size: 15px; }
+.cp-list em { color: var(--mute); font-style: normal; font-size: 12px; }
+.cp-list p { font-size: 13px; color: #d9d2c5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-list .links { display: flex; gap: 8px; font-size: 13px; }
+.cp-list .links a { color: var(--fire2); text-decoration: none; }
+.cp-actions { display: flex; gap: 8px; }
+.cp-actions .btn[hidden] { display: none; }
+.cp-actions .btn { flex: 1; justify-content: center; padding: 10px 12px; font-size: 14px; }
+.hero.focused .ticker { display: none; }
+.hero-copy { transition: opacity .5s; }
+.hero.focused .hero-copy { opacity: .4; }
+.hero.focused .hero-copy:hover, .hero.focused .hero-copy:focus-within { opacity: 1; }
+#map.on-point { cursor: pointer; }
+@media (max-width: 900px) {
+  .cpanel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 52%; border-radius: 16px 16px 0 0; }
+  .hero.focused .hero-copy { visibility: hidden; }
+}
+
 /* intro: la señal antes del fuego */
 .intro { position: fixed; inset: 0; z-index: 50; background: #000; display: grid; place-content: center; justify-items: center;
   gap: 26px; text-align: center; cursor: pointer; transition: opacity .9s ease, visibility .9s; }

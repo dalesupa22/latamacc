@@ -16,8 +16,11 @@ const S = {
 const canvas = $("#map");
 const ctx = canvas.getContext("2d");
 let dpr = 1, cw = 0, ch = 0, scale = 1, ox = 0, oy = 0, px = 0, py = 0;
-let mouse = { x: -1, y: -1, mx: -1, my: -1, inside: false, country: -1 };
+let mouse = { x: -1, y: -1, mx: -1, my: -1, inside: false, country: -1, point: null };
 let heroVisible = true;
+// cámara: k = escala efectiva, x/y = desplazamiento; t* = destino. focus = país explorado (-1 = todo Latam)
+const cam = { k: 1, x: 0, y: 0, tk: 1, tx: 0, ty: 0, ready: false };
+let focus = -1, hoverId = null;
 
 function layout() {
   dpr = Math.min(devicePixelRatio || 1, 2);
@@ -30,6 +33,17 @@ function layout() {
   else { ax = 10; ay = 64; aw = cw - 20; ah = ch * 0.56; }
   scale = Math.min(aw / w, ah / h);
   ox = ax + (aw - w * scale) / 2; oy = ay + (ah - h * scale) / 2;
+  camTarget();
+  if (!cam.ready) { Object.assign(cam, { k: cam.tk, x: cam.tx, y: cam.ty, ready: true }); }
+}
+function camTarget() {
+  if (focus < 0) { Object.assign(cam, { tk: scale, tx: ox, ty: oy }); return; }
+  const b = S.countries[focus].bbox;
+  let ax, ay, aw, ah;
+  if (cw > 900) { ax = cw * 0.36; ay = 90; aw = cw - ax - 400; ah = ch - 130; }
+  else { ax = 16; ay = 70; aw = cw - 32; ah = ch * 0.4; }
+  const k = Math.max(scale, Math.min(aw / b.w, ah / b.h, scale * 8) * 0.85);
+  Object.assign(cam, { tk: k, tx: ax + aw / 2 - (b.x + b.w / 2) * k, ty: ay + ah / 2 - (b.y + b.h / 2) * k });
 }
 
 // sprites de fuego pre-renderizados
@@ -67,6 +81,13 @@ function buildGeometry() {
       c.path.closePath();
     }
     landPath.addPath(c.path);
+    const boxes = c.rings.map(r => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [x, y] of r) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+      return { x0, y0, x1, y1, a: (x1 - x0) * (y1 - y0) }; });
+    const big = Math.max(...boxes.map(b => b.a));
+    const main = boxes.filter(b => b.a >= big * 0.08);
+    const x0 = Math.min(...main.map(b => b.x0)), y0 = Math.min(...main.map(b => b.y0));
+    c.bbox = { x: x0, y: y0, w: Math.max(20, Math.max(...main.map(b => b.x1)) - x0), h: Math.max(20, Math.max(...main.map(b => b.y1)) - y0) };
     if (!c.deco) S.byCode[c.code] = c;
   });
   S.countries = countries;
@@ -162,7 +183,7 @@ function placePoint(b) {
   const c = S.byCode[b.country];
   if (!c || !c.samples?.length) return null;
   const s = c.samples[hash(b.id) % c.samples.length];
-  return { id: b.id, x: s.x, y: s.y, country: b.country, born: performance.now() / 1000, phase: Math.random() * 6.28 };
+  return { id: b.id, name: b.name, kind: b.kind, city: b.city, x: s.x, y: s.y, country: b.country, born: performance.now() / 1000, phase: Math.random() * 6.28 };
 }
 
 // ---------- animación ----------
@@ -193,11 +214,15 @@ function frame() {
   const tx = mouse.x >= 0 ? (mouse.x - cw / 2) * -0.012 : 0, ty = mouse.y >= 0 ? (mouse.y - ch / 2) * -0.012 : 0;
   px += (tx - px) * 0.05; py += (ty - py) * 0.05;
 
+  const ease = reduced ? 1 : 1 - Math.pow(0.02, dt);
+  cam.k += (cam.tk - cam.k) * ease; cam.x += (cam.tx - cam.x) * ease; cam.y += (cam.ty - cam.y) * ease;
+  const zoom = cam.k / scale, shrink = Math.pow(zoom, 0.75);
+
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.globalCompositeOperation = "source-over";
   ctx.fillStyle = "#000"; ctx.fillRect(0, 0, cw, ch);
-  const k = scale;
-  ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * (ox + px), dpr * (oy + py));
+  const k = cam.k;
+  ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * (cam.x + px), dpr * (cam.y + py));
 
   // tierra apagada
   ctx.fillStyle = "#0e0b09"; ctx.fill(landPath);
@@ -214,9 +239,20 @@ function frame() {
   ctx.stroke(landPath);
   ctx.restore();
 
+  // el país explorado queda encendido y el resto se apaga
+  if (focus >= 0) {
+    const c = S.countries[focus];
+    c.dim ||= (() => { const d = new Path2D(landPath); d.addPath(c.path); return d; })();
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,.55)"; ctx.fill(c.dim, "evenodd");
+    ctx.shadowColor = "#ffe3a0"; ctx.shadowBlur = 24 * dpr;
+    ctx.lineWidth = 2.4 / k; ctx.strokeStyle = "#fff1c9"; ctx.stroke(c.path);
+    ctx.restore();
+  }
+
   // país resaltado (hover o chip del directorio)
   const hi = flash && now - flash.t < 2.2 ? flash.c : mouse.country;
-  if (hi >= 0) {
+  if (hi >= 0 && hi !== focus) {
     const c = S.countries[hi];
     ctx.save();
     ctx.fillStyle = "rgba(245,200,100,.2)"; ctx.fill(c.path);
@@ -258,15 +294,19 @@ function frame() {
     if (age < 0) return;
     const intro = Math.min(1, age / 0.6);
     const pulse = 0.75 + Math.sin(now * 2.4 + pt.phase) * 0.25;
-    const r = (20 + 10 * pulse) * intro * (age < 1.2 ? 1 + (1.2 - age) * 3 : 1);
+    const r = (20 + 10 * pulse) * intro * (age < 1.2 ? 1 + (1.2 - age) * 3 : 1) / shrink;
     ctx.globalAlpha = 1;
     ctx.drawImage(BEACON, pt.x - r, pt.y - r, r * 2, r * 2);
+    if (pt === mouse.point || pt.id === hoverId) {
+      const g = 70 / shrink;
+      ctx.drawImage(GLOW, pt.x - g, pt.y - g, g * 2, g * 2);
+    }
     if (i < 400) {
       // onda que sale de cada punto, como un faro
       const a = ((now + pt.phase) % 3) / 3;
       ctx.globalAlpha = (1 - a) * 0.7;
       ctx.lineWidth = 1.5 / k;
-      ctx.beginPath(); ctx.arc(pt.x, pt.y, 8 + a * 46, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, (8 + a * 46) / shrink, 0, Math.PI * 2); ctx.stroke();
     }
   });
 
@@ -317,7 +357,7 @@ function frame() {
     if (e.kind !== "label") continue;
     const a = (now - e.t) / e.dur;
     if (a < 0) continue;
-    const sx = ox + px + e.x * k, sy = oy + py + e.y * k - 26 - a * 30;
+    const sx = cam.x + px + e.x * k, sy = cam.y + py + e.y * k - 26 - a * 30;
     ctx.globalAlpha = a < 0.1 ? a * 10 : a > 0.75 ? (1 - a) * 4 : 1;
     ctx.font = "600 14px Inter, sans-serif"; ctx.textAlign = "center";
     const tw = ctx.measureText(e.text).width + 20;
@@ -336,27 +376,100 @@ const tip = $("#tooltip");
 function toMap(e) {
   const r = canvas.getBoundingClientRect();
   const x = e.clientX - r.left, y = e.clientY - r.top;
-  return { x, y, mx: (x - ox - px) / scale, my: (y - oy - py) / scale };
+  return { x, y, mx: (x - cam.x - px) / cam.k, my: (y - cam.y - py) / cam.k };
+}
+// la luz más cercana al cursor (radio fijo en pantalla)
+function pointAt(mx, my) {
+  const now = performance.now() / 1000;
+  let best = null, bd = (16 / cam.k) ** 2;
+  for (const p of S.points) {
+    if (p.born > now) continue;
+    const d = (p.x - mx) ** 2 + (p.y - my) ** 2;
+    if (d < bd) { bd = d; best = p; }
+  }
+  return best;
 }
 canvas.addEventListener("pointermove", e => {
+  if (!S.map) return;
   const m = toMap(e);
-  Object.assign(mouse, m, { inside: true, country: countryAt(m.mx, m.my) });
-  const c = mouse.country >= 0 ? S.countries[mouse.country] : null;
-  if (c) {
+  Object.assign(mouse, m, { inside: true, country: countryAt(m.mx, m.my), point: pointAt(m.mx, m.my) });
+  canvas.classList.toggle("on-point", !!mouse.point || mouse.country >= 0);
+  const p = mouse.point, c = mouse.country >= 0 ? S.countries[mouse.country] : null;
+  if (p) {
+    tip.innerHTML = `<b>${flag(p.country)} ${esc(p.name || "Builder")}</b><span>${p.kind === "company" ? "Company" : "Person"} · ${esc(p.city || cname(p.country))}</span><span>click to see who it is</span>`;
+  } else if (c) {
     const n = S.byCountry[c.code] || 0;
     const w = S.watching[c.code] || 0;
-    tip.innerHTML = `<b>${flag(c.code)} ${esc(c.en)}</b><span>✦ ${n} in the directory${w ? ` · 👀 ${w} watching now` : ""}</span><span>click to send a spark · double-click to browse</span>`;
-    tip.style.left = m.x + "px"; tip.style.top = m.y + "px"; tip.hidden = false;
-  } else tip.hidden = true;
+    tip.innerHTML = `<b>${flag(c.code)} ${esc(c.en)}</b><span>✦ ${n} in the directory${w ? ` · 👀 ${w} watching now` : ""}</span><span>${focus === c.index ? "click a light to see who it is" : "click to explore"}</span>`;
+  }
+  if (p || c) { tip.style.left = m.x + "px"; tip.style.top = m.y + "px"; tip.hidden = false; } else tip.hidden = true;
 });
-canvas.addEventListener("pointerleave", () => { mouse.inside = false; mouse.country = -1; mouse.x = mouse.y = -1; tip.hidden = true; });
+canvas.addEventListener("pointerleave", () => { Object.assign(mouse, { inside: false, country: -1, point: null, x: -1, y: -1 }); tip.hidden = true; });
 canvas.addEventListener("click", e => {
+  if (!S.map) return;
   const m = toMap(e);
+  const p = pointAt(m.mx, m.my);
   const c = countryAt(m.mx, m.my);
-  flare(m.mx, m.my, null, false);
+  flare(p ? p.x : m.mx, p ? p.y : m.my, null, false);
   sendSpark(m.mx / S.map.w, m.my / S.map.h);
-  if (c >= 0) { const sel = $("#country"); if (!sel.value) sel.value = S.countries[c].code; }
-  if (c >= 0 && e.detail === 2) filterCountry(S.countries[c].code);
+  if (p) openCountry(p.country, p.id);
+  else if (c >= 0) openCountry(S.countries[c].code);
+  else if (focus >= 0) closeCountry();
+});
+
+// ---------- explorar un país ----------
+const hero = $(".hero"), cpanel = $("#cpanel");
+let panelSeq = 0, panelCC = "";
+async function openCountry(cc, id = null) {
+  const c = S.byCode[cc];
+  if (!c) return;
+  const changed = panelCC !== cc;
+  panelCC = cc; focus = c.index; camTarget();
+  hero.classList.add("focused"); cpanel.hidden = false; tip.hidden = true;
+  $("#cp-title").textContent = `${flag(cc)} ${c.en}`;
+  const n = S.byCountry[cc] || 0, w = S.watching[cc] || 0;
+  $("#cp-stats").textContent = `✦ ${n} in the directory${w ? ` · 👀 ${w} watching now` : ""}`;
+  $("#cp-join").textContent = `Join from ${c.en}`;
+  $("#cp-all").hidden = !n;
+  const list = $("#cp-list");
+  if (changed) list.innerHTML = `<li class="empty">Loading…</li>`;
+  const seq = ++panelSeq;
+  let entries = [];
+  try { entries = (await fetch("/api/directory?" + new URLSearchParams({ country: cc })).then(r => r.json())).entries || []; } catch {}
+  if (seq !== panelSeq) return;
+  list.innerHTML = entries.length ? entries.map(b => {
+    const site = safeUrl(b.website);
+    return `<li data-id="${esc(b.id)}"><button type="button" data-id="${esc(b.id)}">
+        <b>${esc(b.name)} <small class="mono">#${b.n}</small></b>
+        <em>${b.kind === "company" ? "Company" : b.company ? `Person @ ${esc(b.company)}` : "Person"}${b.city ? ` · ${esc(b.city)}` : ""}</em>
+        ${b.building ? `<p>✦ ${esc(b.building)}</p>` : ""}
+      </button><span class="links">${site ? `<a href="${esc(site)}" target="_blank" rel="noopener nofollow" aria-label="${esc(host(site))}">↗</a>` : ""}${b.handle ? `<a href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow" aria-label="@${esc(b.handle)} on X">𝕏</a>` : ""}</span></li>`;
+  }).join("") : `<li class="empty">No one in ${esc(c.en)} yet. Be the first to light it up ✦</li>`;
+  if (id) selectMember(id);
+}
+function selectMember(id) {
+  const li = [...$("#cp-list").children].find(l => l.dataset.id === id);
+  $("#cp-list").querySelectorAll("li.on").forEach(l => l.classList.remove("on"));
+  if (li) { li.classList.add("on"); li.scrollIntoView({ block: "nearest", behavior: reduced ? "auto" : "smooth" }); }
+}
+function closeCountry() {
+  focus = -1; panelCC = ""; hoverId = null; panelSeq++; camTarget();
+  hero.classList.remove("focused"); cpanel.hidden = true;
+}
+$("#cp-close").addEventListener("click", closeCountry);
+addEventListener("keydown", e => { if (e.key === "Escape" && focus >= 0) closeCountry(); });
+$("#cp-join").addEventListener("click", () => { if (panelCC) $("#country").value = panelCC; });
+$("#cp-all").addEventListener("click", () => filterCountry(panelCC));
+$("#cp-list").addEventListener("pointerover", e => { hoverId = e.target.closest("li")?.dataset.id || null; });
+$("#cp-list").addEventListener("pointerleave", () => { hoverId = null; });
+$("#cp-list").addEventListener("click", e => {
+  const id = e.target.closest("button")?.dataset.id;
+  const p = id && S.points.find(q => q.id === id);
+  if (!p) return;
+  selectMember(id);
+  const li = e.target.closest("li");
+  flare(p.x, p.y, `${flag(p.country)} ${p.name}`, false);
+  hoverId = id; if (li) li.classList.add("on");
 });
 
 // ---------- WebSocket ----------
@@ -391,6 +504,7 @@ function onJoin(b, total) {
   }
   ticker(b);
   renderStats(); renderFeed(true); renderBoard(); renderChips();
+  if (panelCC === b.country) openCountry(b.country);
   if (matchesFilter(b)) { dir.entries.unshift(b); renderDir(); }
 }
 

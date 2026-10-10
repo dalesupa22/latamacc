@@ -30,7 +30,6 @@
       <div class="nav-r">
         <span class="live mono"><i></i><b id="nav-online">1</b> live</span>
         <a class="hide-sm" href="#directory">Directory</a>
-        <a class="hide-sm" href="#merch">Merch</a>
         <a class="pill" href="#join">Join the directory</a>
       </div>
     </div>
@@ -51,9 +50,20 @@
         <a class="btn primary" href="#join">Join the directory</a>
         <a class="btn" href="#directory">Browse</a>
       </div>
-      <p class="hint mono">Hover the map · click to send a spark everyone sees</p>
+      <p class="hint mono">Click a country to explore who's building there · hover the lights</p>
     </div>
     <div id="tooltip" class="tooltip" hidden></div>
+    <aside id="cpanel" class="cpanel" hidden aria-labelledby="cp-title">
+      <button id="cp-close" class="cp-close" type="button" aria-label="Back to all of Latam">×</button>
+      <p class="kicker mono">Exploring</p>
+      <h3 id="cp-title"></h3>
+      <p id="cp-stats" class="cp-stats"></p>
+      <ul id="cp-list" class="cp-list" aria-live="polite"></ul>
+      <div class="cp-actions">
+        <a id="cp-join" class="btn primary" href="#join">Join the directory</a>
+        <button id="cp-all" class="btn" type="button">See all</button>
+      </div>
+    </aside>
     <ol id="ticker" class="ticker" aria-live="polite"></ol>
   </header>
 
@@ -125,7 +135,7 @@
     </div>
   </section>
 
-  <section id="merch" class="merch">
+  <section id="merch" class="merch" hidden>
     <div class="wrap">
       <p class="kicker mono reveal">03 — Merch</p>
       <div class="merch-head reveal">

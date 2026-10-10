@@ -38,7 +38,7 @@ const directoryQ = db.prepare(`SELECT rowid AS n, * FROM builders
 const byEmail = db.prepare(`SELECT rowid AS n, * FROM builders WHERE email = ?`);
 const recentQ = db.prepare(`SELECT rowid AS n, * FROM builders ORDER BY created_at DESC LIMIT 30`);
 const numberQ = db.prepare(`SELECT rowid AS n FROM builders WHERE id = ?`);
-const pointsQ = db.prepare(`SELECT id, country, created_at FROM builders ORDER BY created_at DESC LIMIT 5000`);
+const pointsQ = db.prepare(`SELECT id, kind, name, city, country, created_at FROM builders ORDER BY created_at DESC LIMIT 5000`);
 const countsQ = db.prepare(`SELECT country, COUNT(*) n FROM builders GROUP BY country`);
 const totalQ = db.prepare(`SELECT COUNT(*) n FROM builders`);
 // Reservas y cobros: las credenciales y el estado de pago permanecen en el servidor.
@@ -139,7 +139,7 @@ function state() {
     total: totalQ.get().n,
     byCountry: Object.fromEntries(countsQ.all().map(r => [r.country, r.n])),
     recent: recentQ.all().map(publicView),
-    points: pointsQ.all().map(r => ({ id: r.id, country: r.country, ts: r.created_at })),
+    points: pointsQ.all().map(r => ({ id: r.id, kind: r.kind || "person", name: r.name, city: r.city || "", country: r.country, ts: r.created_at })),
     ...presence(),
     merchPayments: merchPayments(),
   };
