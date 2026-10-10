@@ -69,8 +69,8 @@ const TEE_SIZES = ["M", "W"].flatMap(f => ["S", "M", "L", "XL"].map(z => `${f}-$
 const MERCH = {
   tee: { price: 49, sizes: TEE_SIZES, pay: true },         // camiseta negra
   "tee-white": { price: 49, sizes: TEE_SIZES, pay: true },
-  cap: { price: null, sizes: ["ONE"] },                     // gorra negra, precio por confirmar
-  "cap-navy": { price: null, sizes: ["ONE"] },
+  cap: { price: 49, sizes: ["ONE"], pay: true },           // gorra negra
+  "cap-navy": { price: 49, sizes: ["ONE"], pay: true },
 };
 const MOONPAY_CONFIG = loadMoonpayConfig();
 const MOONPAY = MOONPAY_CONFIG ? new MoonpayCommerce(MOONPAY_CONFIG) : null;

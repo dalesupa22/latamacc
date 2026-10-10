@@ -75,7 +75,7 @@ test("HTTP checkout verifies provider receipts, capabilities, signed webhooks an
       pricingCurrencyId: USD_ID, pricingDecimals: 6, recipients: [{ walletId: "main-wallet", currencyId: USDC_SOL_ID, publicKey: "MainWallet" }] };
     app = await launch(dir, cfg, true);
     const s = await fetch(app.base + "/api/state").then(r => r.json());
-    assert.equal(s.merchPayments.tee, true); assert.equal(s.merchPayments["tee-white"], true); assert.equal(s.merchPayments.cap, false); assert.ok(!JSON.stringify(s).includes("fake-secret"));
+    assert.equal(s.merchPayments.tee, true); assert.equal(s.merchPayments["tee-white"], true); assert.equal(s.merchPayments.cap, true); assert.equal(s.merchPayments["cap-navy"], true); assert.ok(!JSON.stringify(s).includes("fake-secret"));
     await new Promise(r => setTimeout(r, 3050));
     const result = await post(app.base, { ...body, ft: s.ft, total: 1, requestAmount: "1" }).then(r => r.json());
     assert.equal(result.total, 98); assert.equal(result.payment.status, "awaiting_payment");

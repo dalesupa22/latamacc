@@ -553,8 +553,8 @@ try { pendingPayment = JSON.parse(sessionStorage.getItem("latamacc-checkout") ||
 const ITEMS = {
   tee: { name: "latam/acc Tee · Black", price: 49, fits: ["M", "W"], sizes: ["S", "M", "L", "XL"] },
   "tee-white": { name: "latam/acc Tee · White", price: 49, fits: ["M", "W"], sizes: ["S", "M", "L", "XL"] },
-  cap: { name: "latam/acc Cap · Black", price: null, sizes: ["ONE"] },
-  "cap-navy": { name: "latam/acc Cap · Navy", price: null, sizes: ["ONE"] },
+  cap: { name: "latam/acc Cap · Black", price: 49, sizes: ["ONE"] },
+  "cap-navy": { name: "latam/acc Cap · Navy", price: 49, sizes: ["ONE"] },
 };
 const FITS = { M: "Men", W: "Women" };
 // "W-L" → "Women · L"; las tallas sin corte ("ONE") se muestran tal cual.
@@ -713,7 +713,7 @@ addEventListener("resize", layout);
   guard.ft = state.ft || ""; guard.sitekey = state.turnstile; loadTurnstile();
   Object.assign(merchPayments, state.merchPayments || {}); poButton();
   if (merchPayments.tee) {
-    $("#merch-lead").textContent = "The first Latam/acc drop, built in public. Two tees and two caps, made for builders. Pre-order the tees with MoonPay. Reserve a cap and we'll email you its price.";
+    $("#merch-lead").textContent = "The first Latam/acc drop, built in public. Two tees and two caps, made for builders. Pre-order with MoonPay.";
   }
   if (pendingPayment?.statusToken) { showPayment(); checkPayment(); }
   // los miembros existentes se encienden en cascada cuando termina el dorado
