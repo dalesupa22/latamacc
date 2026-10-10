@@ -15,7 +15,7 @@ assert.ok(start >= 0 && selection > start && submit > selection && end > submit)
 const checkoutSource = source.slice(start, selection) + source.slice(submit, end);
 
 const order = {
-  item: "tee", size: "M", qty: 1, total: 49,
+  item: "tee", size: "M-M", qty: 1, total: 49,
   payment: { checkoutUrl: "https://pay.hel.io/checkout/example", statusToken: "status-token", status: "awaiting_payment" },
 };
 
@@ -34,7 +34,7 @@ function harness({ persisted = null, storageFails = false } = {}) {
     return elements.get(id);
   }
   const form = element("#preorder");
-  form.fields = { item: "tee", size: "M", qty: "1", email: "buyer@example.test", country: "CO", name: "Buyer" };
+  form.fields = { item: "tee", size: "M-M", qty: "1", email: "buyer@example.test", country: "CO", name: "Buyer" };
   for (const key of ["item", "qty", "email", "name"]) {
     form[key] = { value: form.fields[key], focusCount: 0, focus() { this.focusCount++; } };
   }
@@ -115,7 +115,7 @@ test("storage failure keeps the page open and supports payment verification in m
   assert.match(resume, /target="_blank"/);
   assert.match(resume, /rel="[^\"]*noopener[^\"]*"/);
   assert.match(html, /id="payment-title"[^>]*tabindex="-1"/);
-  ui.reply({ status: "paid", item: "tee", size: "M", qty: 1, total: 49 });
+  ui.reply({ status: "paid", item: "tee", size: "M-M", qty: 1, total: 49 });
   await ui.run("checkPayment()");
   assert.equal(ui.requests.at(-1).url, "/api/merch/status?token=status-token");
   assert.equal(ui.element("#payment-title").textContent, "Payment confirmed ✦");
@@ -126,11 +126,11 @@ for (const status of ["paid", "expired", "payment_failed"]) {
   test(`verified ${status} survives reload and a temporary status outage`, async () => {
     const ui = harness();
     await ui.submit();
-    ui.reply({ status, item: "tee", size: "L", qty: 2, total: 98 });
+    ui.reply({ status, item: "tee", size: "W-L", qty: 2, total: 98 });
     await ui.run("checkPayment()");
     const saved = JSON.parse(ui.storage.get("latamacc-checkout"));
     assert.equal(saved.status, status);
-    assert.equal(saved.size, "L");
+    assert.equal(saved.size, "W-L");
     assert.equal(saved.total, 98);
     const restored = harness({ persisted: saved });
     restored.run("showPayment()");
@@ -149,7 +149,7 @@ for (const status of ["paid", "expired", "payment_failed"]) {
 test("an unrecognized backend status cannot confirm a payment", async () => {
   const ui = harness();
   await ui.submit();
-  ui.reply({ status: "unknown", item: "tee", size: "M", qty: 1, total: 49 });
+  ui.reply({ status: "unknown", item: "tee", size: "M-M", qty: 1, total: 49 });
   await ui.run("checkPayment()");
   assert.equal(JSON.parse(ui.storage.get("latamacc-checkout")).status, "awaiting_payment");
   assert.match(ui.element("#payment-detail").textContent, /Could not verify payment/);

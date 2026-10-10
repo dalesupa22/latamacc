@@ -9,7 +9,7 @@ import { MoonpayCommerce, USD_ID, USDC_SOL_ID, loadMoonpayConfig, validateCharge
 const token = "11111111-2222-4333-8444-555555555555";
 const config = { enabled: true, apiKey: "public-test", apiSecret: "secret-test", paylinkId: "paylink-test", webhookToken: "hook-test",
   pricingCurrencyId: USD_ID, pricingDecimals: 6, recipients: [{ walletId: "main-wallet", currencyId: USDC_SOL_ID, publicKey: "MainWallet" }] };
-const order = { id: "order-test", item: "tee", size: "M", qty: 2, email: "buyer@example.test", name: "Test Buyer", country: "CO",
+const order = { id: "order-test", item: "tee", size: "M-M", qty: 2, email: "buyer@example.test", name: "Test Buyer", country: "CO",
   charge_token: token, charge_id: "charge-test", payment_amount: "98000000", payment_currency: USD_ID, expires_at: 10_000 };
 const receipt = () => ({ id: "charge-test", token, pricingCurrencyRequestAmount: "98000000", requestAmount: "98000000",
   paylink: { id: config.paylinkId, pricingCurrency: { id: USD_ID }, dynamic: true, disabled: false, inactive: false,

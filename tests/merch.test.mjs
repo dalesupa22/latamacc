@@ -37,7 +37,7 @@ async function launch(dir, config, mock = false) {
   return { child, base, fixture, requests, stop: async () => { child.kill("SIGTERM"); await once(child, "exit"); } };
 }
 
-const body = { item: "tee", size: "M", qty: 2, email: "buyer@example.test", name: "Buyer", country: "CO" };
+const body = { item: "tee", size: "M-M", qty: 2, email: "buyer@example.test", name: "Buyer", country: "CO" };
 const post = (base, value) => fetch(base + "/api/merch/preorder", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(value) });
 
 test("HTTP reservations without MoonPay preserve data, reject invalid product/qty and report unavailable checkout", async () => {
@@ -46,7 +46,7 @@ test("HTTP reservations without MoonPay preserve data, reject invalid product/qt
   try {
     app = await launch(dir, { enabled: false });
     const s = await fetch(app.base + "/api/state").then(r => r.json());
-    assert.deepEqual(s.merchPayments, { tee: false, cap: false });
+    assert.deepEqual(s.merchPayments, { tee: false, "tee-white": false, cap: false, "cap-navy": false });
     assert.equal((await fetch(app.base + "/api/health").then(r => r.json())).moonpay, false);
     await new Promise(r => setTimeout(r, 3050));
     for (const qty of [1.5, 0, 11, "bad"]) assert.equal((await post(app.base, { ...body, qty, ft: s.ft })).status, 400);
@@ -54,12 +54,15 @@ test("HTTP reservations without MoonPay preserve data, reject invalid product/qt
     const tee = await post(app.base, { ...body, ft: s.ft }); assert.equal(tee.status, 201);
     const j = await tee.json(); assert.equal(j.total, 98); assert.equal(j.payment, undefined);
     assert.equal((await post(app.base, { ...body, item: "cap", size: "ONE", ft: s.ft })).status, 201);
+    assert.equal((await post(app.base, { ...body, item: "cap-navy", size: "ONE", ft: s.ft })).status, 201);
+    assert.equal((await post(app.base, { ...body, item: "tee-white", size: "W-XL", ft: s.ft })).status, 201);
+    for (const size of ["M", "XXL", "M-XXL", "X-L", "ONE"]) assert.equal((await post(app.base, { ...body, size, ft: s.ft })).status, 400);
     assert.equal((await fetch(app.base + "/api/merch/status?token=missing")).status, 404);
     assert.equal((await fetch(app.base + "/api/moonpay/webhook", { method: "POST", body: "{}" })).status, 503);
     await app.stop(); app = null;
     const db = new DatabaseSync(join(dir, "latamacc.db"), { readOnly: true });
     assert.equal(db.prepare("SELECT COUNT(*) n FROM builders").get().n, 0);
-    assert.equal(db.prepare("SELECT COUNT(*) n FROM merch_orders WHERE status = 'reserved'").get().n, 2);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM merch_orders WHERE status = 'reserved'").get().n, 4);
     db.close();
   } finally { if (app) await app.stop(); rmSync(dir, { recursive: true }); }
 });
@@ -72,7 +75,7 @@ test("HTTP checkout verifies provider receipts, capabilities, signed webhooks an
       pricingCurrencyId: USD_ID, pricingDecimals: 6, recipients: [{ walletId: "main-wallet", currencyId: USDC_SOL_ID, publicKey: "MainWallet" }] };
     app = await launch(dir, cfg, true);
     const s = await fetch(app.base + "/api/state").then(r => r.json());
-    assert.equal(s.merchPayments.tee, true); assert.ok(!JSON.stringify(s).includes("fake-secret"));
+    assert.equal(s.merchPayments.tee, true); assert.equal(s.merchPayments["tee-white"], true); assert.equal(s.merchPayments.cap, false); assert.ok(!JSON.stringify(s).includes("fake-secret"));
     await new Promise(r => setTimeout(r, 3050));
     const result = await post(app.base, { ...body, ft: s.ft, total: 1, requestAmount: "1" }).then(r => r.json());
     assert.equal(result.total, 98); assert.equal(result.payment.status, "awaiting_payment");

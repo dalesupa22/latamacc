@@ -547,13 +547,21 @@ function resetGuard(form) { const w = guard.widgets[form]; if (w !== undefined &
 
 // ---------- merch y checkout ----------
 const po = $("#preorder");
-const merchPayments = { tee: false, cap: false };
+const merchPayments = { tee: false, "tee-white": false, cap: false, "cap-navy": false };
 let pendingPayment = null, checkingPayment = false;
 try { pendingPayment = JSON.parse(sessionStorage.getItem("latamacc-checkout") || "null"); } catch {}
 const ITEMS = {
-  tee: { name: "Golden Era Tee", price: 49, sizes: ["S", "M", "L", "XL", "XXL"] },
-  cap: { name: "Signal Cap", price: null, sizes: ["ONE"] },
+  tee: { name: "latam/acc Tee · Black", price: 49, fits: ["M", "W"], sizes: ["S", "M", "L", "XL"] },
+  "tee-white": { name: "latam/acc Tee · White", price: 49, fits: ["M", "W"], sizes: ["S", "M", "L", "XL"] },
+  cap: { name: "latam/acc Cap · Black", price: null, sizes: ["ONE"] },
+  "cap-navy": { name: "latam/acc Cap · Navy", price: null, sizes: ["ONE"] },
 };
+const FITS = { M: "Men", W: "Women" };
+// "W-L" → "Women · L"; las tallas sin corte ("ONE") se muestran tal cual.
+function sizeLabel(size) {
+  const [fit, sz] = String(size).split("-");
+  return sz ? `${FITS[fit] || fit} · ${sz}` : size === "ONE" ? "One size" : size;
+}
 function poButton() {
   const it = ITEMS[po.item.value], q = Math.min(10, Math.max(1, Math.trunc(Number(po.qty.value)) || 1));
   const pays = merchPayments[po.item.value];
@@ -585,7 +593,7 @@ function showPayment(status = pendingPayment?.status || "awaiting_payment") {
   $("#payment-status").hidden = false;
   $("#payment-title").textContent = paid ? "Payment confirmed ✦" : expired ? "Checkout expired" : failed ? "Payment could not be completed" : "Your order is awaiting payment";
   const it = ITEMS[pendingPayment.item];
-  $("#payment-detail").textContent = `${pendingPayment.qty} × ${it?.name || "Merch"} (${pendingPayment.size}) · $${pendingPayment.total} USD. `
+  $("#payment-detail").textContent = `${pendingPayment.qty} × ${it?.name || "Merch"} (${sizeLabel(pendingPayment.size)}) · $${pendingPayment.total} USD. `
     + (paid ? "We'll email you to confirm shipping and delivery." : expired || failed ? "Start another order to get a fresh checkout." : "Complete checkout in MoonPay, then check your payment here. A reservation is confirmed as paid only after payment verification.");
   const url = checkoutUrl(pendingPayment.checkoutUrl);
   $("#payment-resume").hidden = !url || paid || expired || failed;
@@ -622,11 +630,13 @@ function pickItem(li) {
   po.item.value = key;
   $("#po-item").textContent = it.name;
   $("#po-price").textContent = it.price ? `$${it.price} USD` : "Price soon";
-  $("#po-sizes").innerHTML = it.sizes.map((sz, i) => `<label><input type="radio" name="size" value="${sz}" ${sz === "M" || it.sizes.length === 1 ? "checked" : ""} /> <span>${sz === "ONE" ? "One size" : sz}</span></label>`).join("");
+  $("#po-fits").hidden = !it.fits;
+  $("#po-fits").innerHTML = (it.fits || []).map((f, i) => `<label><input type="radio" name="fit" value="${f}" ${i === 0 ? "checked" : ""} /> <span>${FITS[f]}</span></label>`).join("");
+  $("#po-sizes").innerHTML = it.sizes.map(sz => `<label><input type="radio" name="size" value="${sz}" ${sz === "M" || it.sizes.length === 1 ? "checked" : ""} /> <span>${sz === "ONE" ? "One size" : sz}</span></label>`).join("");
   poButton();
 }
 document.querySelectorAll(".drop").forEach(li => {
-  li.addEventListener("click", () => { pickItem(li); li.querySelector(".flip")?.classList.toggle("turned"); });
+  li.addEventListener("click", () => pickItem(li));
   li.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); li.click(); } });
   // inclinación 3D siguiendo el cursor
   li.addEventListener("pointermove", e => {
@@ -644,6 +654,7 @@ po.addEventListener("submit", async e => {
   e.preventDefault();
   const msg = $("#po-msg"), btn = $("#po-btn");
   const data = Object.fromEntries(new FormData(po));
+  if (data.fit) { data.size = `${data.fit}-${data.size}`; delete data.fit; }
   msg.className = "form-msg"; msg.textContent = "";
   if (!data.email.includes("@") || !data.country) { msg.className = "form-msg err"; msg.textContent = "Please add your email and shipping country."; return; }
   btn.disabled = true;
@@ -663,7 +674,7 @@ po.addEventListener("submit", async e => {
     }
     const it = ITEMS[data.item];
     msg.className = "form-msg ok";
-    msg.textContent = `Pre-ordered ✦ ${data.qty} × ${it.name}${data.size !== "ONE" ? ` (${data.size})` : ""}${j.total ? ` · $${j.total} USD` : ""}. We'll email you to confirm payment and shipping.`;
+    msg.textContent = `Pre-ordered ✦ ${data.qty} × ${it.name}${data.size !== "ONE" ? ` (${sizeLabel(data.size)})` : ""}${j.total ? ` · $${j.total} USD` : ""}. We'll email you to confirm payment and shipping.`;
     po.email.value = ""; po.name.value = ""; po.qty.value = 1; poButton();
   } catch (err) {
     msg.className = "form-msg err"; msg.textContent = err.message;
@@ -702,7 +713,7 @@ addEventListener("resize", layout);
   guard.ft = state.ft || ""; guard.sitekey = state.turnstile; loadTurnstile();
   Object.assign(merchPayments, state.merchPayments || {}); poButton();
   if (merchPayments.tee) {
-    $("#merch-lead").textContent = "The first Latam/acc drop, built in public. Black cotton, gold print, made for builders. Pre-order the tee with MoonPay. Reserve the cap and we'll email you its price.";
+    $("#merch-lead").textContent = "The first Latam/acc drop, built in public. Two tees and two caps, made for builders. Pre-order the tees with MoonPay. Reserve a cap and we'll email you its price.";
   }
   if (pendingPayment?.statusToken) { showPayment(); checkPayment(); }
   // los miembros existentes se encienden en cascada cuando termina el dorado

@@ -64,13 +64,17 @@ const attachCharge = db.prepare(`UPDATE merch_orders SET charge_token = ?, charg
 const paymentStatus = db.prepare("UPDATE merch_orders SET status = ? WHERE id = ? AND status <> 'paid'");
 const confirmPayment = db.prepare(`UPDATE merch_orders SET status = 'paid', payment_tx_id = ?, payment_signature = ?, paid_at = ? WHERE id = ?`);
 const ordersQ = db.prepare(`SELECT COUNT(*) n FROM merch_orders`);
+// Corte hombre (M) o mujer (W) + talla, p. ej. "W-L". pay: cobro con MoonPay cuando está configurado.
+const TEE_SIZES = ["M", "W"].flatMap(f => ["S", "M", "L", "XL"].map(z => `${f}-${z}`));
 const MERCH = {
-  tee: { price: 49, sizes: ["S", "M", "L", "XL", "XXL"] },
-  cap: { price: null, sizes: ["ONE"] }, // precio por confirmar
+  tee: { price: 49, sizes: TEE_SIZES, pay: true },         // camiseta negra
+  "tee-white": { price: 49, sizes: TEE_SIZES, pay: true },
+  cap: { price: null, sizes: ["ONE"] },                     // gorra negra, precio por confirmar
+  "cap-navy": { price: null, sizes: ["ONE"] },
 };
 const MOONPAY_CONFIG = loadMoonpayConfig();
 const MOONPAY = MOONPAY_CONFIG ? new MoonpayCommerce(MOONPAY_CONFIG) : null;
-const merchPayments = () => ({ tee: !!MOONPAY, cap: false });
+const merchPayments = () => Object.fromEntries(Object.entries(MERCH).map(([k, m]) => [k, !!MOONPAY && !!m.pay]));
 
 // Anti-bots: token firmado que se entrega al cargar la página. Un envío sin token, o hecho en menos de
 // 3 s, no viene de una persona usando el formulario. Turnstile se suma cuando hay claves configuradas.
@@ -229,7 +233,7 @@ async function merchPreorder(req, res) {
   const size = clean(b.size, 4).toUpperCase();
   const qty = Number(b.qty);
   const country = clean(b.country, 2).toUpperCase();
-  if (!item) return json(res, 400, { error: "Pick the tee or the cap." });
+  if (!item) return json(res, 400, { error: "Pick a tee or a cap." });
   if (!MERCH[item].sizes.includes(size)) return json(res, 400, { error: "Pick a size." });
   if (!Number.isInteger(qty) || !(qty >= 1 && qty <= 10)) return json(res, 400, { error: "Quantity must be 1 to 10." });
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { error: "Invalid email." });
@@ -238,7 +242,7 @@ async function merchPreorder(req, res) {
   insertOrder.run(order.id, item, size, qty, order.name, email, country, ip, order.created_at);
   scheduleBackup();
   const total = MERCH[item].price && MERCH[item].price * qty;
-  if (item === "tee" && MOONPAY) {
+  if (MERCH[item].pay && MOONPAY) {
     const statusToken = randomBytes(32).toString("base64url");
     order.payment_amount = String(BigInt(total * 100) * 10_000n);
     startPayment.run(total * 100, order.payment_amount, USD_ID, statusToken, order.id);
