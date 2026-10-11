@@ -9,7 +9,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;"
 // ---------- estado ----------
 const S = {
   map: null, countries: [], byCode: {}, total: 0, byCountry: {}, online: 1,
-  points: [], seen: new Set(), recent: [], watching: {}, growth: [],
+  points: [], seen: new Set(), recent: [], watching: {}, growth: [], kinds: {},
 };
 
 // ---------- canvas ----------
@@ -501,6 +501,7 @@ function onJoin(b, total) {
   S.total = total ?? S.total + 1;
   const today = bogotaDay(Date.now()), last = S.growth[S.growth.length - 1];
   if (last?.[0] === today) last[1]++; else S.growth.push([today, 1]);
+  S.kinds[b.kind] = (S.kinds[b.kind] || 0) + 1;
   S.recent.unshift(b); S.recent = S.recent.slice(0, 30);
   for (const cc of (b.also || [])) { const extra = placePoint(b, cc); if (extra) S.points.push(extra); }
   const pt = placePoint(b);
@@ -598,7 +599,61 @@ function renderGrowth() {
   $("#g-recent").textContent = day ? `· +${day} today` : week ? `· +${week} this week` : "";
   $("#g-from").textContent = shortDay(days[0]);
   $("#g-to").textContent = "Today";
+  renderGrowthBig();
 }
+// gráfico grande: total acumulado (línea) + nuevos por día (barras), con tooltip
+let growthDays = [];
+function renderGrowthBig() {
+  const svg = $("#gb-chart");
+  const per = new Map(S.growth), today = bogotaDay(Date.now());
+  const days = [];
+  if (S.growth.length) for (let t = Date.parse(S.growth[0][0] + "T12:00:00Z"); ; t += 86400_000) {
+    const d = new Date(t).toISOString().slice(0, 10);
+    days.push(d);
+    if (d >= today || days.length > 3660) break;
+  }
+  let acc = 0;
+  growthDays = days.map(d => { const n = per.get(d) || 0; acc += n; return { d, n, total: acc }; });
+  const week = days.slice(-7).reduce((s, d) => s + (per.get(d) || 0), 0);
+  countUp($("#gs-total"), S.total); countUp($("#gs-week"), week);
+  countUp($("#gs-countries"), Object.values(S.byCountry).filter(n => n > 0).length);
+  countUp($("#gs-people"), S.kinds.person || 0); countUp($("#gs-companies"), S.kinds.company || 0);
+  if (!growthDays.length) { svg.innerHTML = ""; $("#gb-x").innerHTML = $("#gb-y").innerHTML = ""; return; }
+  const W = 1000, H = 300, P = 34, n = growthDays.length;
+  const top = Math.max(1, acc), maxDay = Math.max(1, ...growthDays.map(g => g.n));
+  const x = i => P + (n === 1 ? (W - P) / 2 : (i / (n - 1)) * (W - P * 1.4));
+  const y = v => H - 18 - (v / top) * (H - 40);
+  const bw = Math.max(4, Math.min(40, (W - P) / n * 0.55));
+  // las etiquetas del eje van en HTML para que no se deformen con el SVG estirado
+  const marks = [0, 0.5, 1].map(f => { const v = Math.round(top * f); return { v, yy: y(v) }; });
+  const grid = marks.map(({ yy }) => `<line x1="${P}" x2="${W}" y1="${yy}" y2="${yy}" stroke="#262320" stroke-dasharray="3 5" vector-effect="non-scaling-stroke"/>`).join("");
+  $("#gb-y").innerHTML = marks.map(({ v, yy }) => `<span style="top:${(yy / H) * 100}%">${v.toLocaleString("en")}</span>`).join("");
+  const bars = growthDays.map((g, i) => { const h = (g.n / maxDay) * (H - 40) * 0.45;
+    return g.n ? `<rect x="${x(i) - bw / 2}" y="${H - 18 - h}" width="${bw}" height="${h}" rx="2" fill="rgba(233,192,99,.4)"/>` : ""; }).join("");
+  const pts = growthDays.map((g, i) => [x(i), y(g.total)]);
+  const line = pts.map(([a, b], i) => `${i ? "L" : "M"}${a.toFixed(1)},${b.toFixed(1)}`).join("");
+  const [ex, ey] = pts[pts.length - 1];
+  svg.innerHTML = `<defs><linearGradient id="gbfill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e9c063" stop-opacity=".3"/><stop offset="1" stop-color="#e9c063" stop-opacity="0"/></linearGradient></defs>
+    ${grid}${bars}
+    <path d="${line}L${ex},${H - 18}L${pts[0][0]},${H - 18}Z" fill="url(#gbfill)"/>
+    <path d="${line}" fill="none" stroke="#f3d58c" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+    <circle cx="${ex}" cy="${ey}" r="5" fill="#fff4dc"/>
+    <line id="gb-cursor" x1="0" x2="0" y1="10" y2="${H - 18}" stroke="#f3d58c" stroke-opacity=".5" visibility="hidden"/>`;
+  const ticks = n <= 8 ? growthDays : [0, Math.floor(n / 3), Math.floor((2 * n) / 3), n - 1].map(i => growthDays[i]);
+  $("#gb-x").innerHTML = ticks.map(g => `<span>${g.d === today ? "Today" : shortDay(g.d)}</span>`).join("");
+}
+$("#gb-chart").addEventListener("pointermove", e => {
+  if (!growthDays.length) return;
+  const r = e.currentTarget.getBoundingClientRect(), n = growthDays.length;
+  const W = 1000, P = 34, fx = ((e.clientX - r.left) / r.width) * W;
+  const i = n === 1 ? 0 : Math.max(0, Math.min(n - 1, Math.round(((fx - P) / (W - P * 1.4)) * (n - 1))));
+  const g = growthDays[i], px = (n === 1 ? (W - P) / 2 : P + (i / (n - 1)) * (W - P * 1.4));
+  const cur = $("#gb-cursor"); cur.setAttribute("x1", px); cur.setAttribute("x2", px); cur.setAttribute("visibility", "visible");
+  const tip = $("#gb-tip");
+  tip.innerHTML = `${shortDay(g.d)} · <b>${g.total.toLocaleString("en")}</b> members${g.n ? ` · +${g.n} that day` : ""}`;
+  tip.style.left = Math.max(80, Math.min(r.width - 80, (px / W) * r.width)) + "px"; tip.hidden = false;
+});
+$("#gb-chart").addEventListener("pointerleave", () => { $("#gb-tip").hidden = true; $("#gb-cursor")?.setAttribute("visibility", "hidden"); });
 function ticker(b) {
   const ol = $("#ticker");
   const li = document.createElement("li");
@@ -1121,7 +1176,7 @@ addEventListener("resize", layout);
   const sel = $("#country");
   S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => sel.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));
 
-  S.total = state.total; S.byCountry = state.byCountry; S.recent = state.recent; S.watching = state.watching || {}; S.growth = state.growth || [];
+  S.total = state.total; S.byCountry = state.byCountry; S.recent = state.recent; S.watching = state.watching || {}; S.growth = state.growth || []; S.kinds = state.kinds || {};
   buildAlso(form); buildAlso(pform);
   for (const sel2 of [pform.country, jform.country, $("#jcountry")])
     S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => sel2.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));

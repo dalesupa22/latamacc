@@ -71,6 +71,7 @@ const pointsQ = db.prepare(`SELECT id, kind, name, city, country, also, created_
 const countsQ = db.prepare(`SELECT c AS country, COUNT(*) n FROM (
   SELECT country c FROM builders UNION ALL SELECT j.value FROM builders, json_each(builders.also) j) GROUP BY c`);
 // crecimiento: registros por día, en hora de Bogotá
+const kindsQ = db.prepare(`SELECT kind, COUNT(*) n FROM builders GROUP BY kind`);
 const growthQ = db.prepare(`SELECT date(created_at / 1000, 'unixepoch', '-5 hours') d, COUNT(*) n FROM builders GROUP BY d ORDER BY d`);
 const totalQ = db.prepare(`SELECT COUNT(*) n FROM builders`);
 // Reservas y cobros: las credenciales y el estado de pago permanecen en el servidor.
@@ -201,6 +202,7 @@ function state() {
     editing: EMAIL.enabled, uploads: !!STORAGE,
     points: pointsQ.all().map(r => ({ id: r.id, kind: r.kind || "person", name: r.name, city: r.city || "", country: r.country, also: alsoOf(r), ts: r.created_at })),
     growth: growthQ.all().map(r => [r.d, r.n]),
+    kinds: Object.fromEntries(kindsQ.all().map(r => [r.kind || "person", r.n])),
     ...presence(),
     merchPayments: merchPayments(),
   };

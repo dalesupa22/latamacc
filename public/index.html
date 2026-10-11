@@ -30,6 +30,7 @@
       <div class="nav-r">
         <span class="live mono"><i></i><b id="nav-online">1</b> live</span>
         <a class="hide-sm" href="#directory">Directory</a>
+        <a class="hide-sm" href="#growth">Growth</a>
         <a class="hide-sm" href="#jobs">Jobs</a>
         <button class="navlink hide-sm" type="button" data-me="profile">Edit profile</button>
         <a class="pill" href="#join">Join the directory</a>
@@ -154,6 +155,29 @@
       <p id="dir-count" class="dir-count mono" aria-live="polite"></p>
       <ul id="dir" class="dir"></ul>
       <div class="dir-more"><button id="dir-more" class="btn" type="button" hidden>Show more</button></div>
+    </div>
+  </section>
+
+  <section id="growth" class="growth-sec">
+    <div class="wrap">
+      <p class="kicker mono reveal">Community growth</p>
+      <h2 class="reveal">The golden era, day by day.</h2>
+      <div class="gstats reveal">
+        <div><b id="gs-total">0</b><span>members</span></div>
+        <div><b id="gs-week">0</b><span>joined in the last 7 days</span></div>
+        <div><b id="gs-countries">0</b><span>countries lit</span></div>
+        <div><b id="gs-people">0</b><span>people</span></div>
+        <div><b id="gs-companies">0</b><span>companies</span></div>
+      </div>
+      <figure class="gbig reveal">
+        <div class="gbig-legend mono"><span class="lg-line">Total members</span><span class="lg-bar">New members that day</span></div>
+        <div class="gbig-plot">
+          <svg id="gb-chart" viewBox="0 0 1000 300" preserveAspectRatio="none" role="img" aria-label="Community growth: total members and new members per day"></svg>
+          <div id="gb-y" class="gb-y mono" aria-hidden="true"></div>
+          <div id="gb-tip" class="gb-tip" hidden></div>
+        </div>
+        <div id="gb-x" class="gb-x mono"></div>
+      </figure>
     </div>
   </section>
 

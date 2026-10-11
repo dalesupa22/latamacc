@@ -110,6 +110,22 @@ h2 { font-size: clamp(30px, 4.6vw, 54px); line-height: 1.04; letter-spacing: -.0
 .growth-sum span { color: #d9d2c5; }
 .g-chart { display: block; width: 100%; height: 90px; margin-top: 8px; overflow: visible; }
 .g-axis { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; color: var(--mute); margin-top: 4px; }
+.gstats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 30px; }
+.gstats div { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.gstats b { display: block; font-size: 30px; letter-spacing: -.03em; color: var(--fire2); font-variant-numeric: tabular-nums; }
+.gstats span { color: var(--mute); font-size: 13px; }
+.gbig { margin-top: 18px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 18px 12px; }
+.gbig-legend { display: flex; gap: 18px; font-size: 11px; color: var(--mute); margin-bottom: 10px; }
+.gbig-legend span::before { content: ""; display: inline-block; width: 14px; height: 3px; margin-right: 6px; vertical-align: middle; background: #f3d58c; }
+.gbig-legend .lg-bar::before { height: 9px; width: 8px; background: rgba(233,192,99,.45); }
+.gbig-plot { position: relative; }
+#gb-chart { display: block; width: 100%; height: 300px; }
+.gb-tip { position: absolute; top: 0; transform: translateX(-50%); pointer-events: none; background: rgba(12,10,9,.95); border: 1px solid rgba(240,200,110,.45);
+  border-radius: 10px; padding: 6px 10px; font-size: 12px; white-space: nowrap; }
+.gb-tip b { color: var(--fire2); }
+.gb-y { position: absolute; inset: 0 auto 0 0; width: 30px; pointer-events: none; }
+.gb-y span { position: absolute; right: 0; transform: translateY(-50%); font-size: 11px; color: var(--mute); }
+.gb-x { display: flex; justify-content: space-between; font-size: 11px; color: var(--mute); margin-top: 6px; }
 .howto { margin-top: 22px; list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 22px; max-width: 660px; }
 .howto li { display: flex; gap: 10px; font-size: 14px; color: #cfc9c1; line-height: 1.45; }
 .howto i { color: var(--fire2); font-style: normal; flex: none; }
@@ -148,6 +164,9 @@ h2 { font-size: clamp(30px, 4.6vw, 54px); line-height: 1.04; letter-spacing: -.0
   .ticker li:nth-child(n+3) { display: none; }
   .join-grid { grid-template-columns: 1fr; }
   .howto { grid-template-columns: 1fr; }
+  .gstats { grid-template-columns: repeat(2, 1fr); }
+  .gstats div:first-child { grid-column: span 2; }
+  #gb-chart { height: 220px; }
   .feed { position: static; }
   .form .row { grid-template-columns: 1fr; }
   .nav-r .hide-sm, .nav-r .live { display: none; }

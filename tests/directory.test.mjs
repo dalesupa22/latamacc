@@ -44,6 +44,7 @@ test("nomads appear in every country they build from, and growth counts members 
     assert.equal(after.total, 2);
     assert.deepEqual(after.byCountry, { CO: 2, MX: 1, AR: 1, BR: 1, CL: 1 });
     assert.equal(after.growth.reduce((n, [, c]) => n + c, 0), 2);
+    assert.deepEqual(after.kinds, { person: 2 });
     assert.match(after.growth[0][0], /^\d{4}-\d{2}-\d{2}$/);
     assert.deepEqual(after.points.find(p => p.name === "Nomad").also, ["MX", "AR", "BR", "CL"]);
     assert.ok(!JSON.stringify(after).includes("@example.test"));
