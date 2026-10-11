@@ -967,7 +967,7 @@ signin.addEventListener("submit", async e => {
     const r = await fetch("/api/signin/link", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(guarded(data, "signin")) });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || "Could not send the link.");
-    formMsg(signin, "Check your inbox ✦ If that email is in the directory, a sign-in link is on its way. It works once, for 24 hours.", true);
+    formMsg(signin, "Check your inbox ✦ If that email is in the directory, a sign-in link from danny@latamacc.si is on its way (subject \"Your LATAMACC sign-in link\"). It can take a couple of minutes; if you don't see it, check Spam, Promotions or Updates. It works once, for 24 hours.", true);
   } catch (err) { formMsg(signin, err.message); }
   finally { btn.disabled = false; resetGuard("signin"); }
 });
