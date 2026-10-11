@@ -2,7 +2,7 @@
 
 Sitio de **Latam Accelerationism (Latam/acc)**, en inglés: directorio de empresas y personas de IA que construyen la golden era de la región. El mapa de Latam se enciende en dorado y cada registro se ilumina en vivo en el mapa de todos (WebSocket).
 
-- `server.mjs`: Node 24, sin framework. Estáticos de `public/`, `POST /api/register` (persona o empresa), `GET /api/state`, `GET /api/directory?q=&kind=&country=`, WebSocket en `/ws` (joins, personas en línea y chispas por clic). Guarda en SQLite (`data/latamacc.db`, fuera de Git). El directorio es público (el formulario lo avisa); el correo nunca sale del servidor. `DATA_DIR` permite usar otra carpeta de datos para pruebas.
+- `server.mjs`: Node 24, sin framework. Estáticos de `public/`, `POST /api/register` (persona o empresa), `GET /api/state`, `GET /api/directory?q=&kind=&country=`, WebSocket en `/ws` (joins, personas en línea y chispas por clic). Guarda en SQLite (`data/latamacc.db`, fuera de Git). El directorio es público (el formulario lo avisa); el correo no se expone públicamente y se transmite a Brevo para confirmaciones transaccionales cuando está configurado. `DATA_DIR` permite usar otra carpeta de datos para pruebas.
 - `public/app.js`: canvas del mapa (oro, faros por registro, arcos, hover/clic), formulario y directorio con búsqueda y filtros.
 - `scripts/build-map.mjs`: genera `public/assets/latam.json` desde world-atlas (`npm i` y luego `node scripts/build-map.mjs countries-50m.json`).
 
@@ -64,6 +64,26 @@ node scripts/storage.mjs get documentos/archivo.pdf /ruta/nueva-copia.pdf
 `check` consulta acceso al bucket; `probe` sube un texto sintético, comprueba lectura/cifrado y elimina únicamente ese objeto de prueba. Si falta permiso de borrado, devuelve código 1, `cleanedUp: false` y la clave sintética que quedó pendiente, aunque lectura y escritura hayan funcionado. La herramienta no sobrescribe archivos locales al descargar. Requiere `s3:ListBucket` para `check`, `s3:PutObject`/`s3:GetObject` para almacenar y leer, y `s3:DeleteObject` (o `s3:DeleteObjectVersion` con versionado) para limpiar la prueba.
 
 Después de configurar, reiniciar `latamacc-web`. `/api/health` sólo expone `s3: true/false`: indica configuración cargada, no una comprobación continua de conectividad. Sin configuración, el sitio sigue funcionando. No hay un endpoint público de subida ni migración automática de SQLite o sus respaldos; los flujos futuros pueden usar el módulo desde el backend. Pruebas aisladas: `node --test tests/storage.test.mjs`. Referencia: [AWS SDK para S3](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/javascript_s3_code_examples.html).
+
+## Correo transaccional con Brevo
+
+`lib/email.mjs` envía por HTTPS a `https://api.brevo.com/v3/smtp/email`. Guardar la clave dedicada de LATAMACC en `~/.config/latamacc/brevo.json`, fuera de Git, con permisos **600** (carpeta 700):
+
+```json
+{"apiKey":"BREVO_API_KEY","fromEmail":"danny@latamacc.si","fromName":"LATAMACC","replyToEmail":"danny@latamacc.si","minIntervalMs":2000,"maxPerHour":20,"maxPerDay":100,"maxPerRecipientPerDay":3}
+```
+
+`BREVO_CONFIG_FILE` permite otra ruta privada. `BREVO_ENABLED=0` desactiva lectura de credenciales, cola y envíos; debe usarse en pruebas ajenas a correo. Sin archivo o con `enabled:false`, el sitio funciona sin correo. Configuraciones inválidas se desactivan con un error genérico. Los valores predeterminados de remitente y respuesta son `danny@latamacc.si`, el buzón verificado inicial; cambiar ambos cuando el nuevo buzón de César esté verificado. No se utilizan remitentes de Xertify. `/api/health` expone únicamente `email: true/false` (configuración cargada, no garantía de entrega).
+
+Sólo se encolan registros **nuevos**, reservas sin cobro y pagos verificados. No se recorren registros históricos ni se crean contactos o campañas. Un checkout pendiente no genera confirmación de pago. `email_outbox` conserva el evento único `tipo:id`, contenido y estado en SQLite. Cuando el correo está activo, el registro, reserva o cambio a pagado y su evento se guardan en la misma transacción: si falla la escritura de la cola, se revierte esa operación. Los envíos se procesan de forma serial después de confirmar la transacción, sin llamadas de red dentro de ella. Si Brevo falla, el alta o pedido sigue guardado. Al desactivar correo, los nuevos eventos no se encolan; los pendientes anteriores se conservan hasta reactivarlo.
+
+Los límites predeterminados son 20 intentos/hora y 100/24 horas, separados por al menos 2 segundos, con un máximo de 3 intentos por destinatario/24 horas. Se conservan entre reinicios; el historial de intentos de más de 24 horas se elimina al arrancar y procesar la cola. Sólo los errores 429 permiten hasta 4 intentos en total, con espera exponencial de al menos un minuto y respetando `Retry-After` hasta 24 horas. Los demás errores 4xx quedan como `failed`. Timeouts, errores 5xx (que pueden ocurrir tras aceptar el mensaje), respuestas ambiguas y envíos interrumpidos por un reinicio quedan como `unknown`, sin reenvío automático: primero conciliar su entrega en Brevo. Los pendientes expiran a las 48 horas (`maxAgeMs` configurable) para no enviar confirmaciones antiguas. `sent` significa que Brevo aceptó el mensaje, no que llegó al buzón. No se confía en una ventana temporal del proveedor para deduplicar.
+
+Cada mensaje contiene HTML sencillo y texto equivalente, sin imágenes, promociones, enlaces externos o contenido de perfil del usuario. Los destinatarios llevan `contactPixelTrackingConsent:false`; activar en Brevo el consentimiento de píxel por contacto y dejar desactivado el seguimiento para consentimiento desconocido. No se inserta ningún píxel en el contenido. Revisar el MIME recibido para comprobar los ajustes efectivos del proveedor. No hay webhook público nuevo ni importación de contactos.
+
+Administración local: `node scripts/email.mjs check` consulta cuenta, dominio y remitentes sin enviar mensajes. `node scripts/email.mjs probe --to destinatario@example.com` envía una prueba sintética al destinatario explícito, sin crear registros ni pedidos; comprobar después el correo recibido. La aceptación de la API no demuestra entrega en inbox.
+
+Pruebas aisladas: `BREVO_ENABLED=0 node --test tests/*.test.mjs`. Los tests de correo usan claves ficticias, transporte simulado y SQLite temporal, sin contactar Brevo. Después de configurar y validar, reiniciar `latamacc-web` para cargar la clave. Documentación: [envío transaccional](https://developers.brevo.com/reference/send-transac-email), [consentimiento para píxeles](https://help.brevo.com/hc/en-us/articles/37114679474706-About-email-tracking-pixels-and-the-CNIL-recommendation-in-Brevo).
 
 ## Correr
 

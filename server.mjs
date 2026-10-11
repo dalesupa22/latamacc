@@ -8,6 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { WebSocketServer } from "ws";
 import { loadMoonpayConfig, MoonpayCommerce, USD_ID, validateCharge, verifyWebhook } from "./lib/moonpay.mjs";
 import { loadStorageConfig, S3Storage } from "./lib/storage.mjs";
+import { loadBrevoConfig, BrevoMailer, EmailOutbox } from "./lib/email.mjs";
 
 const ROOT = new URL(".", import.meta.url).pathname;
 const PUBLIC = join(ROOT, "public");
@@ -67,7 +68,7 @@ const startPayment = db.prepare(`UPDATE merch_orders SET status = 'awaiting_paym
   payment_amount = ?, payment_currency = ?, status_token = ? WHERE id = ?`);
 const attachCharge = db.prepare(`UPDATE merch_orders SET charge_token = ?, charge_id = ?, checkout_url = ?, expires_at = ? WHERE id = ?`);
 const paymentStatus = db.prepare("UPDATE merch_orders SET status = ? WHERE id = ? AND status <> 'paid'");
-const confirmPayment = db.prepare(`UPDATE merch_orders SET status = 'paid', payment_tx_id = ?, payment_signature = ?, paid_at = ? WHERE id = ?`);
+const confirmPayment = db.prepare(`UPDATE merch_orders SET status = 'paid', payment_tx_id = ?, payment_signature = ?, paid_at = ? WHERE id = ? AND status <> 'paid'`);
 const ordersQ = db.prepare(`SELECT COUNT(*) n FROM merch_orders`);
 // Corte hombre (M) o mujer (W) + talla, p. ej. "W-L". pay: cobro con MoonPay cuando está configurado.
 const TEE_SIZES = ["M", "W"].flatMap(f => ["S", "M", "L", "XL"].map(z => `${f}-${z}`));
@@ -133,7 +134,26 @@ setInterval(backup, 60 * 60_000);
 let backupSoon;
 const scheduleBackup = () => { dataRevision++; clearTimeout(backupSoon); backupSoon = setTimeout(backup, 30_000); };
 
-// Es un directorio público: el formulario avisa qué se publica. El correo nunca sale del servidor.
+const EMAIL_CONFIG = (() => {
+  try { return loadBrevoConfig(); }
+  catch { console.error("Brevo configuration unavailable."); return null; }
+})();
+const EMAIL = new EmailOutbox(db, EMAIL_CONFIG ? new BrevoMailer(EMAIL_CONFIG) : null,
+  { config: EMAIL_CONFIG, onChange: scheduleBackup });
+EMAIL.start();
+function persistWithEmail(write) {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = write();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+// El correo no se expone públicamente; se transmite a Brevo para confirmaciones transaccionales.
 function publicView(r) {
   return { id: r.id, n: r.n, kind: r.kind || "person", name: r.name, company: r.company || "", country: r.country, city: r.city || "",
     building: r.building || "", website: r.website || "", handle: r.handle || "", ts: r.created_at };
@@ -160,7 +180,7 @@ function presence() {
 function health() {
   return { ok: true, builders: totalQ.get().n, dbBytes: statSync(DB_FILE).size, journal: db.prepare("PRAGMA journal_mode").get().journal_mode,
     lastBackup: lastBackup && { at: new Date(lastBackup.at).toISOString(), builders: lastBackup.builders, preorders: lastBackup.orders }, preorders: ordersQ.get().n,
-    turnstile: !!TURNSTILE, moonpay: !!MOONPAY, s3: !!STORAGE, online: wss.clients.size };
+    turnstile: !!TURNSTILE, moonpay: !!MOONPAY, s3: !!STORAGE, email: EMAIL.enabled, online: wss.clients.size };
 }
 
 const clean = (v, max) => (typeof v === "string" ? v.replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, max) : "");
@@ -218,7 +238,10 @@ async function register(req, res) {
     city: clean(b.city, 60), building: clean(b.building, 140), handle: clean(b.handle, 30).replace(/^@/, ""),
     ip, created_at: Date.now(),
   };
-  insert.run(row.id, row.kind, row.name, row.company, row.email, row.country, row.city, row.building, row.website, row.handle, row.ip, row.created_at);
+  persistWithEmail(() => {
+    insert.run(row.id, row.kind, row.name, row.company, row.email, row.country, row.city, row.building, row.website, row.handle, row.ip, row.created_at);
+    EMAIL.enqueue("registered", row);
+  });
   const pub = publicView({ ...row, n: numberQ.get(row.id).n });
   broadcast({ type: "join", builder: pub, total: totalQ.get().n });
   scheduleBackup();
@@ -244,7 +267,10 @@ async function merchPreorder(req, res) {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { error: "Invalid email." });
   if (!COUNTRIES.has(country)) return json(res, 400, { error: "Pick a Latam country for shipping." });
   const order = { id: randomUUID(), item, size, qty, name: clean(b.name, 60), email, country, created_at: Date.now() };
-  insertOrder.run(order.id, item, size, qty, order.name, email, country, ip, order.created_at);
+  persistWithEmail(() => {
+    insertOrder.run(order.id, item, size, qty, order.name, email, country, ip, order.created_at);
+    if (!(MERCH[item].pay && MOONPAY)) EMAIL.enqueue("reserved", order);
+  });
   scheduleBackup();
   const total = MERCH[item].price && MERCH[item].price * qty;
   if (MERCH[item].pay && MOONPAY) {
@@ -272,9 +298,12 @@ async function reconcilePayment(order) {
   const charge = await MOONPAY.getCharge(order.charge_token);
   const result = validateCharge(charge, order, MOONPAY_CONFIG);
   if (result.status === "paid") {
-    const used = orderByTransaction.get(result.transactionId);
-    if (used && used.id !== order.id) throw new Error("Payment transaction is already attached to another order.");
-    confirmPayment.run(result.transactionId, result.signature, Date.now(), order.id);
+    persistWithEmail(() => {
+      const used = orderByTransaction.get(result.transactionId);
+      if (used && used.id !== order.id) throw new Error("Payment transaction is already attached to another order.");
+      if (confirmPayment.run(result.transactionId, result.signature, Date.now(), order.id).changes)
+        EMAIL.enqueue("paid", order);
+    });
   } else paymentStatus.run(result.status, order.id);
   if (result.status !== order.status) scheduleBackup();
   return orderByStatus.get(order.status_token);
@@ -402,6 +431,6 @@ wss.on("connection", (ws, req) => {
 // Mantiene vivas las conexiones a través del túnel.
 setInterval(() => { for (const c of wss.clients) if (c.readyState === 1) c.ping(); }, 25_000);
 
-for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { backup(); db.close(); STORAGE?.close(); process.exit(0); });
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { EMAIL.stop(); backup(); db.close(); STORAGE?.close(); process.exit(0); });
 
 server.listen(PORT, HOST, () => console.log(`latamacc en http://${HOST}:${server.address().port}`));
