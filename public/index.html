@@ -31,6 +31,7 @@
         <span class="live mono"><i></i><b id="nav-online">1</b> live</span>
         <a class="hide-sm" href="#directory">Directory</a>
         <a class="hide-sm" href="#growth">Growth</a>
+        <a class="hide-sm" href="#bounties">Bounties</a>
         <a class="hide-sm" href="#jobs">Jobs</a>
         <button class="navlink hide-sm" type="button" data-me="profile">Edit profile</button>
         <a class="pill" href="#join">Join the directory</a>
@@ -181,9 +182,31 @@
     </div>
   </section>
 
+  <section id="bounties" class="jobs bounties">
+    <div class="wrap">
+      <p class="kicker mono reveal">03 — Bounties</p>
+      <div class="jobs-head reveal">
+        <h2>Get paid to accelerate Latam.</h2>
+        <button class="btn primary" type="button" data-me="bounties">Post a bounty</button>
+      </div>
+      <p class="lead reveal">Rewards from members for sales intros, product work and content. Pick one, deliver, and get paid by the member who posted it. Posting is free.</p>
+      <div class="filters reveal">
+        <input id="bq" type="search" placeholder="Search bounties, rewards, members…" aria-label="Search bounties" />
+        <div class="seg small" role="radiogroup" aria-label="Category">
+          <label><input type="radio" name="bcat" value="" checked /> <span>All</span></label>
+          <label><input type="radio" name="bcat" value="intro" /> <span>Intros</span></label>
+          <label><input type="radio" name="bcat" value="product" /> <span>Product</span></label>
+          <label><input type="radio" name="bcat" value="content" /> <span>Content</span></label>
+          <label><input type="radio" name="bcat" value="other" /> <span>Other</span></label>
+        </div>
+      </div>
+      <ul id="bounties-list" class="jobs-list" aria-live="polite"></ul>
+    </div>
+  </section>
+
   <section id="jobs" class="jobs">
     <div class="wrap">
-      <p class="kicker mono reveal">03 — Jobs</p>
+      <p class="kicker mono reveal">04 — Jobs</p>
       <div class="jobs-head reveal">
         <h2>Build the golden era with us.</h2>
         <button class="btn primary" type="button" data-me="jobs">Post a job</button>
@@ -206,7 +229,7 @@
 
   <section id="merch" class="merch" hidden>
     <div class="wrap">
-      <p class="kicker mono reveal">04 — Merch</p>
+      <p class="kicker mono reveal">05 — Merch</p>
       <div class="merch-head reveal">
         <h2>Wear the golden era.</h2>
         <span class="soon mono">Pre-order</span>
@@ -278,7 +301,7 @@
     <a href="#top" data-tab="top"><span>◎</span>Map</a>
     <a href="#directory" data-tab="directory"><span>☰</span>Directory</a>
     <a href="#join" data-tab="join" class="tab-join"><span>✦</span>Join</a>
-    <a href="#jobs" data-tab="jobs"><span>◆</span>Jobs</a>
+    <a href="#bounties" data-tab="bounties"><span>◆</span>Bounties</a>
     <button type="button" data-me="profile"><span>◉</span>Profile</button>
   </div>
 
@@ -311,6 +334,7 @@
       </div>
       <div class="seg small me-tabs" role="tablist">
         <label><input type="radio" name="metab" value="profile" checked /> <span>Profile</span></label>
+        <label><input type="radio" name="metab" value="bounties" /> <span>Bounties</span></label>
         <label><input type="radio" name="metab" value="jobs" /> <span>Jobs</span></label>
       </div>
       <div id="me-profile">
@@ -346,6 +370,25 @@
             <label><span>X handle <span class="opt">(optional)</span></span><input name="handle" maxlength="30" /></label>
           </div>
           <button class="btn primary big" type="submit">Save changes</button>
+          <p class="form-msg" role="status"></p>
+        </form>
+      </div>
+      <div id="me-bounties" hidden>
+        <ul id="my-bounties" class="my-jobs"></ul>
+        <form id="bform" class="form" novalidate>
+          <b class="form-title">Post a bounty</b>
+          <label>What do you need?<input name="title" required maxlength="90" placeholder="Intro to the CTO of a bank in Mexico" /></label>
+          <div class="row">
+            <label>Category<select name="category"><option value="intro">Sales intro</option><option value="product">Product</option><option value="content">Content</option><option value="other">Other</option></select></label>
+            <label>Reward<input name="reward" required maxlength="60" placeholder="USD 500 or 10% of the first deal" /></label>
+          </div>
+          <label><span>Details <span class="opt">(optional · 800 characters)</span></span><textarea name="description" maxlength="800" rows="3" placeholder="What counts as delivered, who you want to meet, format, examples…"></textarea></label>
+          <div class="row">
+            <label>Where to submit<input name="submit" required maxlength="200" placeholder="Link to a form or you@startup.ai" /></label>
+            <label><span>Deadline <span class="opt">(default 30 days)</span></span><input name="deadline" type="date" /></label>
+          </div>
+          <p class="fine">Bounties are public with your profile name. You pay the reward directly to whoever delivers.</p>
+          <button class="btn primary big" type="submit">Publish bounty</button>
           <p class="form-msg" role="status"></p>
         </form>
       </div>

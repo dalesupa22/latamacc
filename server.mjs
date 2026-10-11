@@ -46,6 +46,13 @@ db.exec(`CREATE TABLE IF NOT EXISTS jobs (
   created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, closed_at INTEGER);
   CREATE INDEX IF NOT EXISTS jobs_builder ON jobs(builder_id);
   CREATE INDEX IF NOT EXISTS jobs_open ON jobs(closed_at, expires_at);`);
+// Bounties: recompensas que publica un miembro (intros de ventas, producto, contenido). La recompensa la paga
+// directamente quien publica a quien entrega; vencen en su fecha límite o cuando su autor las cierra.
+db.exec(`CREATE TABLE IF NOT EXISTS bounties (
+  id TEXT PRIMARY KEY, builder_id TEXT NOT NULL, title TEXT NOT NULL, category TEXT NOT NULL, reward TEXT NOT NULL,
+  description TEXT, submit TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, closed_at INTEGER);
+  CREATE INDEX IF NOT EXISTS bounties_builder ON bounties(builder_id);
+  CREATE INDEX IF NOT EXISTS bounties_open ON bounties(closed_at, expires_at);`);
 // Acceso de miembros sin contraseña: enlace por correo (un uso, 24 h) que se canjea por una sesión (30 días).
 // Solo se guarda el hash SHA-256 de cada token.
 db.exec(`CREATE TABLE IF NOT EXISTS member_tokens (
@@ -199,6 +206,7 @@ function state() {
     byCountry: Object.fromEntries(countsQ.all().map(r => [r.country, r.n])),
     recent: recentQ.all().map(publicView),
     jobs: openJobsTotal.get(Date.now()).n,
+    bounties: openBountiesTotal.get(Date.now()).n,
     editing: EMAIL.enabled, uploads: !!STORAGE,
     points: pointsQ.all().map(r => ({ id: r.id, kind: r.kind || "person", name: r.name, city: r.city || "", country: r.country, also: alsoOf(r), ts: r.created_at })),
     growth: growthQ.all().map(r => [r.d, r.n]),
@@ -309,7 +317,9 @@ function sessionOf(req) {
   return t ? byId.get(t.builder_id) || null : null;
 }
 const myJobsQ = db.prepare("SELECT * FROM jobs WHERE builder_id = ? AND closed_at IS NULL AND expires_at > ? ORDER BY created_at DESC");
-const me = r => ({ ...publicView(r), email: r.email, jobs: myJobsQ.all(r.id, Date.now()).map(j => jobView(j, r)) });
+const myBountiesQ = db.prepare("SELECT * FROM bounties WHERE builder_id = ? AND closed_at IS NULL AND expires_at > ? ORDER BY created_at DESC");
+const me = r => ({ ...publicView(r), email: r.email, jobs: myJobsQ.all(r.id, Date.now()).map(j => jobView(j, r)),
+  bounties: myBountiesQ.all(r.id, Date.now()).map(x => bountyView(x, r)) });
 
 async function requestLink(req, res) {
   const ip = clientIp(req);
@@ -413,11 +423,72 @@ const deleteBuilder = db.prepare("DELETE FROM builders WHERE id = ?");
 const deleteJobsOf = db.prepare("DELETE FROM jobs WHERE builder_id = ?");
 const deleteTokensOf = db.prepare("DELETE FROM member_tokens WHERE builder_id = ?");
 function removeProfile(res, builder) {
-  persistWithEmail(() => { deleteJobsOf.run(builder.id); deleteTokensOf.run(builder.id); deleteBuilder.run(builder.id); });
+  persistWithEmail(() => { deleteJobsOf.run(builder.id); deleteBountiesOf.run(builder.id); deleteTokensOf.run(builder.id); deleteBuilder.run(builder.id); });
   if (builder.avatar) STORAGE?.remove(builder.avatar).catch(() => {});
   scheduleBackup();
   broadcast({ type: "remove", id: builder.id, total: totalQ.get().n });
   json(res, 200, { ok: true });
+}
+
+// ---------- bounties ----------
+const BOUNTY_CATEGORIES = ["intro", "product", "content", "other"];
+const deleteBountiesOf = db.prepare("DELETE FROM bounties WHERE builder_id = ?");
+const insertBounty = db.prepare(`INSERT INTO bounties (id,builder_id,title,category,reward,description,submit,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?)`);
+const closeBounty = db.prepare("UPDATE bounties SET closed_at = ? WHERE id = ? AND builder_id = ? AND closed_at IS NULL");
+const openBountiesCount = db.prepare("SELECT COUNT(*) n FROM bounties WHERE builder_id = ? AND closed_at IS NULL AND expires_at > ?");
+const bountiesQ = db.prepare(`SELECT x.*, b.name AS poster, b.kind AS poster_kind, b.avatar AS poster_avatar FROM bounties x JOIN builders b ON b.id = x.builder_id
+  WHERE x.closed_at IS NULL AND x.expires_at > :now AND (:category = '' OR x.category = :category)
+    AND (:q = '' OR x.title LIKE :like OR x.description LIKE :like OR x.reward LIKE :like OR b.name LIKE :like)
+  ORDER BY x.expires_at ASC LIMIT 60 OFFSET :offset`);
+const openBountiesTotal = db.prepare("SELECT COUNT(*) n FROM bounties WHERE closed_at IS NULL AND expires_at > ?");
+function bountyView(x, poster = { name: x.poster, kind: x.poster_kind, avatar: x.poster_avatar }) {
+  return { id: x.id, title: x.title, category: x.category, reward: x.reward, description: x.description || "", submit: x.submit,
+    poster: { id: x.builder_id, name: poster.name, kind: poster.kind || "person", avatar: poster.avatar ? `/media/${poster.avatar}` : "" },
+    ts: x.created_at, deadline: x.expires_at };
+}
+// enlace o correo para entregar; misma regla que "How to apply" de empleos
+function contactLink(value) {
+  let v = clean(value, 200);
+  if (EMAIL_RE.test(v) && !/^https?:/i.test(v)) return "mailto:" + v.replace(/^mailto:/i, "");
+  if (!/^https?:\/\//i.test(v)) v = "https://" + v;
+  try { const u = new URL(v); if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".")) return null; return u.href; } catch { return null; }
+}
+function parseBounty(b, now) {
+  const title = clean(b.title, 90);
+  if (title.length < 3) return { error: "Add a title for the bounty." };
+  const category = BOUNTY_CATEGORIES.includes(b.category) ? b.category : null;
+  if (!category) return { error: "Pick a category." };
+  const reward = clean(b.reward, 60);
+  if (reward.length < 2) return { error: "Add the reward, for example USD 500 or 10% of the first deal." };
+  const submit = contactLink(b.submit);
+  if (!submit) return { error: "Add a link or an email where people submit." };
+  // fecha límite YYYY-MM-DD (fin del día en Bogotá), entre mañana y 180 días; por defecto 30 días
+  let expires = now + 30 * DAY;
+  if (b.deadline) {
+    const t = Date.parse(String(b.deadline).slice(0, 10) + "T23:59:59-05:00");
+    if (!Number.isFinite(t) || t < now + HOUR || t > now + 180 * DAY) return { error: "Pick a deadline within the next 6 months." };
+    expires = t;
+  }
+  return { title, category, reward, submit, expires, description: clean(String(b.description || "").replace(/\r?\n/g, " "), 800) };
+}
+async function postBounty(req, res, builder) {
+  if (limited("bounty:" + builder.id, 10, HOUR)) return json(res, 429, { error: "Too many bounties, please wait a while." });
+  let b;
+  try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
+  const now = Date.now(), x = parseBounty(b, now);
+  if (x.error) return json(res, 400, { error: x.error });
+  if (openBountiesCount.get(builder.id, now).n >= 10) return json(res, 400, { error: "You can have up to 10 open bounties. Close one first." });
+  insertBounty.run(randomUUID(), builder.id, x.title, x.category, x.reward, x.description, x.submit, now, x.expires);
+  scheduleBackup();
+  const row = byId.get(builder.id);
+  broadcast({ type: "bounties" });
+  json(res, 201, { ok: true, me: me(row) });
+}
+function endBounty(res, builder, id) {
+  if (!closeBounty.run(Date.now(), id, builder.id).changes) return json(res, 404, { error: "Bounty not found." });
+  scheduleBackup();
+  broadcast({ type: "bounties" });
+  json(res, 200, { ok: true, me: me(byId.get(builder.id)) });
 }
 
 // ---------- empleos ----------
@@ -630,6 +701,12 @@ const server = createServer(async (req, res) => {
       const rows = jobsQ.all({ q, like: `%${q}%`, country, workplace, type, now: Date.now(), offset: Math.max(0, Number(u.get("offset")) || 0) });
       return json(res, 200, { jobs: rows.map(j => jobView(j)) });
     }
+    if (pathname === "/api/bounties" && req.method === "GET") {
+      const u = new URL(req.url, "http://x").searchParams;
+      const q = clean(u.get("q") || "", 60), category = BOUNTY_CATEGORIES.includes(u.get("category")) ? u.get("category") : "";
+      const rows = bountiesQ.all({ q, like: `%${q}%`, category, now: Date.now(), offset: Math.max(0, Number(u.get("offset")) || 0) });
+      return json(res, 200, { bounties: rows.map(x => bountyView(x)) });
+    }
     if (pathname === "/api/signin/link" && req.method === "POST") return await requestLink(req, res);
     if (pathname === "/api/signin" && req.method === "POST") return await startSession(req, res);
     if (pathname === "/api/me" || pathname.startsWith("/api/me/")) {
@@ -645,6 +722,9 @@ const server = createServer(async (req, res) => {
         return json(res, 200, { ok: true });
       }
       if (pathname === "/api/me/jobs" && req.method === "POST") return await postJob(req, res, builder);
+      if (pathname === "/api/me/bounties" && req.method === "POST") return await postBounty(req, res, builder);
+      const closeB = /^\/api\/me\/bounties\/([0-9a-f-]{36})\/close$/.exec(pathname);
+      if (closeB && req.method === "POST") return endBounty(res, builder, closeB[1]);
       const close = /^\/api\/me\/jobs\/([0-9a-f-]{36})\/close$/.exec(pathname);
       if (close && req.method === "POST") return endJob(res, builder, close[1]);
       return json(res, 404, { error: "not found" });

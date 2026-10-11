@@ -484,8 +484,9 @@ function connect() {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type === "hello" || m.type === "presence") { setOnline(m.online); S.watching = m.watching || {}; }
     else if (m.type === "join") onJoin(m.builder, m.total);
-    else if (m.type === "update" || m.type === "remove") { refreshState(); loadDir(); if (m.type === "remove") loadJobs(); }
+    else if (m.type === "update" || m.type === "remove") { refreshState(); loadDir(); if (m.type === "remove") { loadJobs(); loadBounties(); } }
     else if (m.type === "jobs") { loadJobs(); patchEntry(m.builder); }
+    else if (m.type === "bounties") loadBounties();
     else if (m.type === "spark" && S.map) flare(m.x * S.map.w, m.y * S.map.h, null, false);
   };
   ws.onclose = () => { setTimeout(connect, wsDelay); wsDelay = Math.min(wsDelay * 2, 15000); };
@@ -837,6 +838,39 @@ async function loadJobs() {
         <ul><li>✦ Reach ${S.total.toLocaleString("en")} AI builders across ${Object.values(S.byCountry).filter(n => n > 0).length} countries</li><li>✦ Free for members, live in seconds</li><li>✦ Remote, hybrid or on-site, with your own apply link</li></ul>
         <button class="btn primary" type="button" data-me="jobs">Post a job</button></li>`;
 }
+// ---------- bounties ----------
+const bounties = { list: [], q: "", category: "" };
+const CATS = { intro: "Sales intro", product: "Product", content: "Content", other: "Other" };
+function due(ts) {
+  const d = Math.ceil((ts - Date.now()) / 86400_000);
+  return d <= 1 ? "Ends today" : d <= 7 ? `Ends in ${d} days` : `Ends ${new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Bogota" })}`;
+}
+function bountyCard(x, mine = false) {
+  const submit = applyUrl(x.submit), soon = x.deadline - Date.now() < 3 * 86400_000;
+  return `<li class="job bounty">
+    <div class="job-tags"><span class="badge cat-${esc(x.category)}">${CATS[x.category] || ""}</span><span class="bounty-due ${soon ? "urgent" : ""}">${due(x.deadline)}</span></div>
+    <span class="bounty-reward">${esc(x.reward)}</span>
+    <div class="job-top">${avatar(x.poster)}<div><b>${esc(x.title)}</b><span>posted by ${esc(x.poster.name)} · ${ago(x.ts)}</span></div></div>
+    ${x.description ? `<p>${esc(x.description)}</p>` : ""}
+    <div class="card-foot"><span></span>${mine
+      ? `<button class="btn small" type="button" data-close-bounty="${esc(x.id)}">Close bounty</button>`
+      : submit ? `<a class="btn small primary" href="${esc(submit)}" target="_blank" rel="noopener nofollow">Submit ↗</a>` : ""}</div>
+  </li>`;
+}
+async function loadBounties() {
+  const qs = new URLSearchParams({ q: bounties.q, category: bounties.category });
+  try { bounties.list = (await fetch("/api/bounties?" + qs).then(r => r.json())).bounties || []; } catch { bounties.list = []; }
+  const filtered = bounties.q || bounties.category;
+  $("#bounties-list").innerHTML = bounties.list.length ? bounties.list.map(x => bountyCard(x)).join("")
+    : filtered ? `<li class="empty">No open bounties match. <button class="linkish" type="button" data-me="bounties">Post one →</button></li>`
+    : `<li class="jobs-empty"><b>Post the first bounty on Latam/acc.</b>
+        <ul><li>✦ Intros to sales leads, product work or content, from ${S.total.toLocaleString("en")} builders across ${Object.values(S.byCountry).filter(n => n > 0).length} countries</li><li>✦ You set the reward and the deadline, and pay whoever delivers</li><li>✦ Free for members, live in seconds</li></ul>
+        <button class="btn primary" type="button" data-me="bounties">Post a bounty</button></li>`;
+}
+let bountiesTimer;
+$("#bq").addEventListener("input", e => { bounties.q = e.target.value.trim(); clearTimeout(bountiesTimer); bountiesTimer = setTimeout(loadBounties, 200); });
+document.querySelectorAll('input[name="bcat"]').forEach(r => r.addEventListener("change", e => { bounties.category = e.target.value; loadBounties(); }));
+
 let jobsTimer;
 $("#jq").addEventListener("input", e => { jobs.q = e.target.value.trim(); clearTimeout(jobsTimer); jobsTimer = setTimeout(loadJobs, 200); });
 $("#jcountry").addEventListener("change", e => { jobs.country = e.target.value; loadJobs(); });
@@ -858,7 +892,7 @@ async function api(path, opts = {}) {
   return j;
 }
 function setTab(tab) {
-  $("#me-profile").hidden = tab !== "profile"; $("#me-jobs").hidden = tab !== "jobs";
+  $("#me-profile").hidden = tab !== "profile"; $("#me-jobs").hidden = tab !== "jobs"; $("#me-bounties").hidden = tab !== "bounties";
   dlg.querySelector(`input[name="metab"][value="${tab}"]`).checked = true;
 }
 function showMe(tab) {
@@ -872,7 +906,8 @@ async function openMe(tab = "profile") {
   showMe(tab);
   if (!member.me) {
     const m = signin.querySelector(".form-msg");
-    m.className = "form-msg"; m.textContent = tab === "jobs" ? "Jobs are posted by directory members. Sign in to post one." : "";
+    m.className = "form-msg"; m.textContent = tab === "jobs" ? "Jobs are posted by directory members. Sign in to post one."
+      : tab === "bounties" ? "Bounties are posted by directory members. Sign in to post one." : "";
     if (!member.editing) { m.className = "form-msg err"; m.textContent = "Email sign-in opens very soon. Please check back later."; }
   }
 }
@@ -901,6 +936,7 @@ function renderMe() {
   for (const b of pform.querySelectorAll(".also-grid input")) b.checked = m.also.includes(b.value);
   pform.querySelector(".also").open = m.also.length > 0;
   syncKind(pform); syncAlso(pform);
+  $("#my-bounties").innerHTML = m.bounties?.length ? `<li class="form-title">Your open bounties</li>` + m.bounties.map(x => bountyCard(x, true)).join("") : "";
   $("#my-jobs").innerHTML = m.jobs.length ? `<li class="form-title">Your open jobs</li>` + m.jobs.map(j => jobCard(j, true)).join("") : "";
 }
 function formMsg(f, text, ok = false) { const m = f.querySelector(".form-msg"); m.className = `form-msg ${ok ? "ok" : "err"}`; m.textContent = text; }
@@ -961,6 +997,22 @@ jform.addEventListener("submit", async e => {
   } catch (err) { formMsg(jform, err.message); }
   finally { btn.disabled = false; }
 });
+const bform = $("#bform");
+bform.addEventListener("submit", async e => {
+  e.preventDefault();
+  const btn = bform.querySelector("button[type=submit]"), data = Object.fromEntries(new FormData(bform));
+  btn.disabled = true;
+  try {
+    await api("/api/me/bounties", { method: "POST", json: data });
+    bform.reset(); formMsg(bform, "Published ✦ Your bounty is live in the Bounties section.", true); loadBounties();
+  } catch (err) { formMsg(bform, err.message); }
+  finally { btn.disabled = false; }
+});
+$("#my-bounties").addEventListener("click", async e => {
+  const id = e.target.closest("[data-close-bounty]")?.dataset.closeBounty;
+  if (!id || !confirm("Close this bounty? It will disappear from the Bounties section.")) return;
+  try { await api(`/api/me/bounties/${id}/close`, { method: "POST" }); loadBounties(); } catch (err) { toast(err.message); }
+});
 $("#my-jobs").addEventListener("click", async e => {
   const id = e.target.closest("[data-close-job]")?.dataset.closeJob;
   if (!id || !confirm("Close this job? It will disappear from the Jobs section.")) return;
@@ -971,7 +1023,7 @@ $("#me-signout").addEventListener("click", async () => {
   saveSession(""); member.me = null; showMe(); toast("Signed out.");
 });
 $("#me-delete").addEventListener("click", async () => {
-  if (!confirm("Remove your profile from the directory? Your light, profile and jobs will be deleted. This can't be undone.")) return;
+  if (!confirm("Remove your profile from the directory? Your light, profile, jobs and bounties will be deleted. This can't be undone.")) return;
   try { await api("/api/me", { method: "DELETE" }); saveSession(""); member.me = null; dlg.close(); toast("Your profile was removed."); }
   catch (err) { toast(err.message); }
 });
@@ -1160,7 +1212,7 @@ const tabs = [...document.querySelectorAll(".tabbar [data-tab]")];
 const tabIO = new IntersectionObserver(es => es.forEach(e => {
   if (e.isIntersecting) tabs.forEach(t => t.classList.toggle("on", t.dataset.tab === e.target.id));
 }), { rootMargin: "-45% 0px -50% 0px" });
-["top", "join", "directory", "jobs"].forEach(id => tabIO.observe(document.getElementById(id)));
+["top", "join", "directory", "bounties"].forEach(id => tabIO.observe(document.getElementById(id)));
 const clock = () => { $("#clock").textContent = new Date().toLocaleTimeString("en-GB", { timeZone: "America/Bogota", hour12: false }) + " BOG"; };
 clock(); setInterval(clock, 1000);
 setInterval(() => renderFeed(false), 60_000);
@@ -1201,7 +1253,7 @@ addEventListener("resize", layout);
     }
   });
   renderStats(); renderFeed(false); renderBoard(); renderGrowth(); renderChips(); syncKind();
-  loadDir(); loadJobs(); consumeSignin();
+  loadDir(); loadJobs(); loadBounties(); consumeSignin();
   addEventListener("hashchange", consumeSignin);
   connect();
   requestAnimationFrame(frame);

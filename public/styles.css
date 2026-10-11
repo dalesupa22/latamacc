@@ -393,6 +393,10 @@ button.badge { background: none; font: inherit; font-size: 11px; cursor: pointer
 .me-foot { display: flex; justify-content: space-between; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 13px; }
 @media (max-width: 600px) { .me { padding: 22px 16px; } .jobs-list { grid-template-columns: 1fr; } .howto { grid-template-columns: 1fr; } }
 
+.bounty-reward { font-size: 22px; letter-spacing: -.02em; color: var(--fire2); font-weight: 700; }
+.badge.cat-intro { border-color: rgba(240,200,110,.6); color: var(--fire2); }
+.bounty-due { color: var(--mute); font-size: 12px; }
+.bounty-due.urgent { color: #f0b46a; }
 .jobs-empty { grid-column: 1 / -1; list-style: none; border: 1px solid rgba(240,200,110,.35); border-radius: 18px; padding: 28px;
   background: linear-gradient(120deg, rgba(240,200,110,.09), transparent 60%); display: grid; gap: 14px; justify-items: start; }
 .jobs-empty b { font-size: 22px; letter-spacing: -.02em; }

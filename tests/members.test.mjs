@@ -102,6 +102,27 @@ test("members sign in by email, switch to a company, post and close jobs, and re
   assert.equal((await a.call("/api/jobs").then(r => r.json())).jobs.length, 0);
   assert.equal((await a.call(`/api/me/jobs/${job.id}/close`, { method: "POST", session })).status, 404);
 
+  // bounties
+  const bpost = body => a.call("/api/me/bounties", { method: "POST", session, body });
+  assert.equal((await a.call("/api/me/bounties", { method: "POST", body: { title: "Intro", category: "intro", reward: "USD 500", submit: "a@ana.ai" } })).status, 401);
+  assert.equal((await bpost({ title: "Intro to a bank CTO", category: "nope", reward: "USD 500", submit: "a@ana.ai" })).status, 400);
+  assert.equal((await bpost({ title: "Intro to a bank CTO", category: "intro", reward: "", submit: "a@ana.ai" })).status, 400);
+  assert.equal((await bpost({ title: "Intro to a bank CTO", category: "intro", reward: "USD 500", submit: "" })).status, 400);
+  assert.equal((await bpost({ title: "Intro to a bank CTO", category: "intro", reward: "USD 500", submit: "a@ana.ai", deadline: "2001-01-01" })).status, 400);
+  const day = new Date(Date.now() + 10 * 86400_000).toISOString().slice(0, 10);
+  const bposted = await bpost({ title: "Intro to a bank CTO", category: "intro", reward: "USD 500", submit: "a@ana.ai", deadline: day, description: "Mexico <only>" });
+  assert.equal(bposted.status, 201);
+  const bounty = (await bposted.json()).me.bounties[0];
+  assert.deepEqual([bounty.submit, bounty.description, bounty.reward, bounty.poster.name], ["mailto:a@ana.ai", "Mexico only", "USD 500", "Ana AI"]);
+  assert.equal(new Date(bounty.deadline).toISOString().slice(0, 10) >= day, true);
+  assert.equal((await bpost({ title: "Launch video", category: "content", reward: "USD 200", submit: "ana.ai/brief" })).status, 201);
+  assert.deepEqual((await a.call("/api/bounties?category=intro").then(r => r.json())).bounties.map(x => x.title), ["Intro to a bank CTO"]);
+  assert.equal((await a.call("/api/bounties?q=video").then(r => r.json())).bounties[0].submit, "https://ana.ai/brief");
+  assert.equal((await a.call("/api/state").then(r => r.json())).bounties, 2);
+  assert.equal((await a.call(`/api/me/bounties/${bounty.id}/close`, { method: "POST", session })).status, 200);
+  assert.equal((await a.call(`/api/me/bounties/${bounty.id}/close`, { method: "POST", session })).status, 404);
+  assert.equal((await a.call("/api/bounties").then(r => r.json())).bounties.length, 1);
+
   // sin S3 la subida se rechaza con claridad; /media solo sirve claves de avatares
   assert.equal((await a.call("/api/me/avatar", { method: "POST", session, raw: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]), type: "image/png" })).status, 503);
   assert.equal((await a.call("/media/../data/latamacc.db")).status, 404);
@@ -112,5 +133,6 @@ test("members sign in by email, switch to a company, post and close jobs, and re
   const after = await a.call("/api/state").then(r => r.json());
   assert.equal(after.total, 0);
   assert.deepEqual(after.byCountry, {});
+  assert.equal(a.rows("SELECT COUNT(*) n FROM bounties")[0].n, 0, "a removed profile takes its bounties");
   assert.ok(!a.output().includes("fake-brevo-private"));
 });
