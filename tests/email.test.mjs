@@ -224,3 +224,20 @@ test("pending confirmations expire and attempt recipient history is pruned after
   assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM email_attempts").get().n, 0);
   assert.equal(await f.box.processOne(), false);
 });
+
+test("expired sign-in links lose their payload when the general queue age limit expires first", async t => {
+  for (const maxAgeMs of [2 * DAY, HOUR]) await t.test(`maxAgeMs=${maxAgeMs}`, async t => {
+    const f = fixture(t, { maxAgeMs });
+    const link = `https://latamacc.si/#signin=${"a".repeat(43)}`;
+    f.box.enqueue("login", { id: "expired-link", email: "builder@example.test", link });
+    f.box.enqueue("registered", registration());
+    const registrationPayload = f.row("registered:new-builder").payload;
+    assert.ok(f.row("login:expired-link").payload.includes(link));
+    f.advance(maxAgeMs + 1);
+    assert.equal(await f.box.processOne(), false);
+    assert.equal(f.row("login:expired-link").status, "expired");
+    assert.equal(f.row("login:expired-link").payload, "{}");
+    assert.equal(f.row("registered:new-builder").payload, registrationPayload);
+    assert.equal(f.calls.length, 0);
+  });
+});
