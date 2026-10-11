@@ -73,6 +73,12 @@
         <p class="kicker mono reveal">01 — Register below</p>
         <h2 class="reveal">Join the directory.</h2>
         <p class="lead reveal">Building with AI in Latin America? Add yourself or your company. Your light turns on live, on everyone's map.</p>
+        <div class="howto reveal">
+          <div><b>Who can join</b><span>Founders, engineers, researchers and creators building with AI in or from Latin America, and AI companies.</span></div>
+          <div><b>What you need</b><span>A name, an email and the country you build from. Everything else is optional.</span></div>
+          <div><b>How it works</b><span>Free, about 30 seconds, no approval. Your light turns on instantly.</span></div>
+          <div><b>Privacy</b><span>Your email stays private. Name, country, city, project and links are public.</span></div>
+        </div>
         <form id="form" class="form reveal" novalidate>
           <div class="seg" role="radiogroup" aria-label="Register as">
             <label><input type="radio" name="kind" value="person" checked /> <span>Person</span></label>
@@ -87,6 +93,10 @@
             <label>Country<select name="country" id="country" required><option value="">Select your country</option></select></label>
             <label>City<input name="city" maxlength="60" autocomplete="address-level2" placeholder="Bogotá" /></label>
           </div>
+          <details class="also" id="also">
+            <summary>Also building from other countries? <span class="opt">(optional · up to 4, for nomads)</span></summary>
+            <div class="also-grid" id="also-grid" role="group" aria-label="Other countries you build from"></div>
+          </details>
           <label><span id="building-label">What are you building?</span><input name="building" maxlength="140" placeholder="AI agents for SMB accounting" /></label>
           <div class="row">
             <label><span>Website <span class="opt">(optional)</span></span><input name="website" maxlength="120" inputmode="url" placeholder="startup.ai" /></label>
@@ -112,7 +122,13 @@
       <aside class="feed reveal">
         <div class="feed-head mono"><i></i> Just joined</div>
         <ol id="feed"></ol>
-        <div class="feed-head mono">Top countries</div>
+        <div class="feed-head mono">Directory growth</div>
+        <div class="growth">
+          <p class="growth-sum"><b id="g-total">0</b> members <span id="g-recent"></span></p>
+          <svg id="g-chart" class="g-chart" viewBox="0 0 300 90" preserveAspectRatio="none" role="img" aria-label="Total members over time"></svg>
+          <div class="g-axis mono"><span id="g-from"></span><span>total members over time</span><span id="g-to"></span></div>
+        </div>
+        <div class="feed-head mono">Members by country</div>
         <ol id="board" class="board"></ol>
       </aside>
     </div>

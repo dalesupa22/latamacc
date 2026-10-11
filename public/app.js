@@ -9,7 +9,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;"
 // ---------- estado ----------
 const S = {
   map: null, countries: [], byCode: {}, total: 0, byCountry: {}, online: 1,
-  points: [], seen: new Set(), recent: [], watching: {},
+  points: [], seen: new Set(), recent: [], watching: {}, growth: [],
 };
 
 // ---------- canvas ----------
@@ -179,11 +179,13 @@ function flare(x, y, label, big = true) {
 
 // ---------- puntos de builders ----------
 function hash(str) { let h = 2166136261; for (const ch of str) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
-function placePoint(b) {
-  const c = S.byCode[b.country];
+const countriesOf = b => [b.country, ...(b.also || [])];
+function placePoint(b, cc = b.country) {
+  const c = S.byCode[cc];
   if (!c || !c.samples?.length) return null;
-  const s = c.samples[hash(b.id) % c.samples.length];
-  return { id: b.id, name: b.name, kind: b.kind, city: b.city, x: s.x, y: s.y, country: b.country, born: performance.now() / 1000, phase: Math.random() * 6.28 };
+  const s = c.samples[hash(b.id + (cc === b.country ? "" : cc)) % c.samples.length];
+  // en otro país la ciudad no aplica
+  return { id: b.id, name: b.name, kind: b.kind, city: cc === b.country ? b.city : "", x: s.x, y: s.y, country: cc, born: performance.now() / 1000, phase: Math.random() * 6.28 };
 }
 
 // ---------- animación ----------
@@ -441,7 +443,7 @@ async function openCountry(cc, id = null) {
     const site = safeUrl(b.website);
     return `<li data-id="${esc(b.id)}"><button type="button" data-id="${esc(b.id)}">
         <b>${esc(b.name)} <small class="mono">#${b.n}</small></b>
-        <em>${b.kind === "company" ? "Company" : b.company ? `Person @ ${esc(b.company)}` : "Person"}${b.city ? ` · ${esc(b.city)}` : ""}</em>
+        <em>${b.kind === "company" ? "Company" : b.company ? `Person @ ${esc(b.company)}` : "Person"}${b.country !== cc ? ` · based in ${flag(b.country)} ${esc(cname(b.country))}` : b.city ? ` · ${esc(b.city)}` : ""}${b.also?.length && b.country === cc ? ` · also in ${b.also.map(flag).join(" ")}` : ""}</em>
         ${b.building ? `<p>✦ ${esc(b.building)}</p>` : ""}
       </button><span class="links">${site ? `<a href="${esc(site)}" target="_blank" rel="noopener nofollow" aria-label="${esc(host(site))}">↗</a>` : ""}${b.handle ? `<a href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow" aria-label="@${esc(b.handle)} on X">𝕏</a>` : ""}</span></li>`;
   }).join("") : `<li class="empty">No one in ${esc(c.en)} yet. Be the first to light it up ✦</li>`;
@@ -492,9 +494,12 @@ function setOnline(n) { S.online = n; $("#online").textContent = n; $("#nav-onli
 function onJoin(b, total) {
   if (S.seen.has(b.id)) return;
   S.seen.add(b.id);
-  S.byCountry[b.country] = (S.byCountry[b.country] || 0) + 1;
+  for (const cc of countriesOf(b)) S.byCountry[cc] = (S.byCountry[cc] || 0) + 1;
   S.total = total ?? S.total + 1;
+  const today = bogotaDay(Date.now()), last = S.growth[S.growth.length - 1];
+  if (last?.[0] === today) last[1]++; else S.growth.push([today, 1]);
   S.recent.unshift(b); S.recent = S.recent.slice(0, 30);
+  for (const cc of (b.also || [])) { const extra = placePoint(b, cc); if (extra) S.points.push(extra); }
   const pt = placePoint(b);
   if (pt) {
     S.points.push(pt);
@@ -503,8 +508,8 @@ function onJoin(b, total) {
     if (c) flash = { c: c.index, t: performance.now() / 1000 };
   }
   ticker(b);
-  renderStats(); renderFeed(true); renderBoard(); renderChips();
-  if (panelCC === b.country) openCountry(b.country);
+  renderStats(); renderFeed(true); renderBoard(); renderGrowth(); renderChips();
+  if (countriesOf(b).includes(panelCC)) openCountry(panelCC);
   if (matchesFilter(b)) { dir.entries.unshift(b); renderDir(); }
 }
 
@@ -534,7 +539,37 @@ function renderFeed(isNew) {
 function renderBoard() {
   const rows = Object.entries(S.byCountry).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(0, 8);
   const max = rows[0]?.[1] || 1;
-  $("#board").innerHTML = rows.length ? rows.map(([cc, n]) => `<li title="${esc(cname(cc))}"><span>${flag(cc)}</span><div class="bar"><i style="width:${(n / max) * 100}%"></i></div><b>${n}</b></li>`).join("") : `<li class="empty" style="display:block;color:var(--mute)">No countries lit yet.</li>`;
+  $("#board").innerHTML = rows.length ? rows.map(([cc, n]) => `<li title="${n} ${n === 1 ? "member" : "members"} in ${esc(cname(cc))}"><span>${flag(cc)}</span><span class="cn">${esc(cname(cc))}</span><div class="bar"><i style="width:${(n / max) * 100}%"></i></div><b>${n}</b></li>`).join("") : `<li class="empty" style="display:block;color:var(--mute)">No countries lit yet.</li>`;
+}
+const bogotaDay = ts => new Date(ts).toLocaleDateString("en-CA", { timeZone: "America/Bogota" });
+const shortDay = d => new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+// total acumulado por día (rellenando los días sin registros) como línea con área
+function renderGrowth() {
+  $("#g-total").textContent = S.total.toLocaleString("en");
+  const svg = $("#g-chart");
+  if (!S.growth.length) { svg.innerHTML = ""; $("#g-from").textContent = $("#g-to").textContent = $("#g-recent").textContent = ""; return; }
+  const per = new Map(S.growth), today = bogotaDay(Date.now());
+  const days = [];
+  for (let t = Date.parse(S.growth[0][0] + "T12:00:00Z"); ; t += 86400_000) {
+    const d = new Date(t).toISOString().slice(0, 10);
+    days.push(d);
+    if (d >= today || days.length > 3660) break;
+  }
+  let acc = 0;
+  const series = days.map(d => (acc += per.get(d) || 0));
+  const top = Math.max(1, series[series.length - 1]), W = 300, H = 90;
+  const xy = series.map((v, i) => [series.length === 1 ? W : (i / (series.length - 1)) * W, H - 4 - (v / top) * (H - 12)]);
+  if (xy.length === 1) xy.unshift([0, H - 4]);
+  const line = xy.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join("");
+  const [ex, ey] = xy[xy.length - 1];
+  svg.innerHTML = `<defs><linearGradient id="gfill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e9c063" stop-opacity=".35"/><stop offset="1" stop-color="#e9c063" stop-opacity="0"/></linearGradient></defs>
+    <path d="${line}L${W},${H}L0,${H}Z" fill="url(#gfill)"/>
+    <path d="${line}" fill="none" stroke="#f3d58c" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+    <circle cx="${ex}" cy="${ey}" r="3.5" fill="#fff4dc" vector-effect="non-scaling-stroke"/>`;
+  const day = per.get(today) || 0, week = days.slice(-7).reduce((s, d) => s + (per.get(d) || 0), 0);
+  $("#g-recent").textContent = day ? `· +${day} today` : week ? `· +${week} this week` : "";
+  $("#g-from").textContent = shortDay(days[0]);
+  $("#g-to").textContent = "Today";
 }
 function ticker(b) {
   const ol = $("#ticker");
@@ -548,7 +583,7 @@ function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = fal
 
 // ---------- directorio ----------
 const dir = { entries: [], q: "", kind: "", country: "" };
-const matchesFilter = b => (!dir.kind || b.kind === dir.kind) && (!dir.country || b.country === dir.country) &&
+const matchesFilter = b => (!dir.kind || b.kind === dir.kind) && (!dir.country || countriesOf(b).includes(dir.country)) &&
   (!dir.q || [b.name, b.company, b.building, b.city].join(" ").toLowerCase().includes(dir.q.toLowerCase()));
 
 function renderChips() {
@@ -568,6 +603,7 @@ function renderDir() {
       <div class="card-top"><span class="flag">${flag(b.country)}</span><span class="badge ${b.kind}">${b.kind === "company" ? "Company" : "Person"}</span><small class="mono">#${b.n}</small></div>
       <b>${esc(b.name)}</b>${b.kind === "person" && b.company ? `<span class="co">${esc(b.company)}</span>` : ""}
       ${b.building ? `<p>${esc(b.building)}</p>` : ""}
+      ${b.also?.length ? `<span class="also-flags">Also in ${b.also.map(flag).join(" ")}</span>` : ""}
       <div class="card-foot"><span>${esc([b.city, cname(b.country)].filter(Boolean).join(", "))}</span>
         <span class="links">${site ? `<a href="${esc(site)}" target="_blank" rel="noopener nofollow">${esc(host(site))} ↗</a>` : ""}${b.handle ? `<a href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow">𝕏</a>` : ""}</span></div>
     </li>`;
@@ -595,6 +631,23 @@ $("#country-chips").addEventListener("click", e => {
 
 // ---------- formulario ----------
 const form = $("#form");
+function buildAlso() {
+  const grid = $("#also-grid");
+  grid.innerHTML = S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en))
+    .map(c => `<label><input type="checkbox" value="${c.code}" /> ${flag(c.code)} ${esc(c.en)}</label>`).join("");
+  syncAlso();
+}
+function syncAlso() {
+  const boxes = [...$("#also-grid").querySelectorAll("input")];
+  const full = boxes.filter(b => b.checked).length >= 4;
+  for (const b of boxes) {
+    if (b.value === form.country.value) b.checked = false;
+    b.disabled = b.value === form.country.value || (full && !b.checked);
+    b.parentElement.classList.toggle("off", b.disabled);
+  }
+}
+$("#also-grid").addEventListener("change", syncAlso);
+form.country.addEventListener("change", syncAlso);
 function syncKind() {
   const company = form.kind.value === "company";
   $("#name-label").textContent = company ? "Company name" : "Your name or username";
@@ -609,6 +662,7 @@ form.addEventListener("submit", async e => {
   e.preventDefault();
   const msg = $("#form-msg"), btn = $("#submit");
   const data = Object.fromEntries(new FormData(form));
+  data.also = [...$("#also-grid").querySelectorAll("input:checked")].map(b => b.value);
   msg.className = "form-msg"; msg.textContent = "";
   if (!data.name.trim() || !data.email.includes("@") || !data.country) { msg.className = "form-msg err"; msg.textContent = "Please add a name, email and country."; return; }
   btn.disabled = true; btn.textContent = "Joining…";
@@ -618,7 +672,7 @@ form.addEventListener("submit", async e => {
     if (!r.ok) throw new Error(j.error || "Could not register.");
     showDone(j.builder, j.existing);
     if (j.existing) return;
-    form.reset(); syncKind();
+    form.reset(); syncKind(); syncAlso(); $("#also").open = false;
     window.scrollTo({ top: 0, behavior: "smooth" });
     // si el socket no llegó, se pinta localmente
     setTimeout(() => onJoin(j.builder), 700);
@@ -819,7 +873,8 @@ addEventListener("resize", layout);
   const sel = $("#country");
   S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => sel.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));
 
-  S.total = state.total; S.byCountry = state.byCountry; S.recent = state.recent; S.watching = state.watching || {};
+  S.total = state.total; S.byCountry = state.byCountry; S.recent = state.recent; S.watching = state.watching || {}; S.growth = state.growth || [];
+  buildAlso();
   setOnline(state.online || 1);
   const psel = $("#po-country");
   S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => psel.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));
@@ -834,10 +889,12 @@ addEventListener("resize", layout);
   const base = START + BURN;
   state.points.slice().reverse().forEach((b, i, arr) => {
     S.seen.add(b.id);
-    const pt = placePoint(b);
-    if (pt) { pt.born = base + (i / Math.max(1, arr.length)) * Math.min(3, arr.length * 0.15); S.points.push(pt); }
+    for (const cc of countriesOf(b)) {
+      const pt = placePoint(b, cc);
+      if (pt) { pt.born = base + (i / Math.max(1, arr.length)) * Math.min(3, arr.length * 0.15); S.points.push(pt); }
+    }
   });
-  renderStats(); renderFeed(false); renderBoard(); renderChips(); syncKind();
+  renderStats(); renderFeed(false); renderBoard(); renderGrowth(); renderChips(); syncKind();
   loadDir();
   connect();
   requestAnimationFrame(frame);

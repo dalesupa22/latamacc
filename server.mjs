@@ -34,18 +34,24 @@ db.exec(`CREATE TABLE IF NOT EXISTS builders (
   city TEXT, building TEXT, handle TEXT, ip TEXT, created_at INTEGER NOT NULL)`);
 // Columnas del directorio (migración en caliente para bases existentes).
 const cols = new Set(db.prepare("PRAGMA table_info(builders)").all().map(c => c.name));
-for (const [col, def] of [["kind", "TEXT NOT NULL DEFAULT 'person'"], ["company", "TEXT"], ["website", "TEXT"]])
+// also: otros países donde también construye (nómadas), como arreglo JSON de códigos.
+for (const [col, def] of [["kind", "TEXT NOT NULL DEFAULT 'person'"], ["company", "TEXT"], ["website", "TEXT"], ["also", "TEXT NOT NULL DEFAULT '[]'"]])
   if (!cols.has(col)) db.exec(`ALTER TABLE builders ADD COLUMN ${col} ${def}`);
-const insert = db.prepare(`INSERT INTO builders (id,kind,name,company,email,country,city,building,website,handle,ip,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+const insert = db.prepare(`INSERT INTO builders (id,kind,name,company,email,country,also,city,building,website,handle,ip,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 const directoryQ = db.prepare(`SELECT rowid AS n, * FROM builders
-  WHERE (:country = '' OR country = :country) AND (:kind = '' OR kind = :kind)
+  WHERE (:country = '' OR country = :country OR EXISTS (SELECT 1 FROM json_each(builders.also) j WHERE j.value = :country))
+    AND (:kind = '' OR kind = :kind)
     AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like)
   ORDER BY created_at DESC LIMIT 60 OFFSET :offset`);
 const byEmail = db.prepare(`SELECT rowid AS n, * FROM builders WHERE email = ?`);
 const recentQ = db.prepare(`SELECT rowid AS n, * FROM builders ORDER BY created_at DESC LIMIT 30`);
 const numberQ = db.prepare(`SELECT rowid AS n FROM builders WHERE id = ?`);
-const pointsQ = db.prepare(`SELECT id, kind, name, city, country, created_at FROM builders ORDER BY created_at DESC LIMIT 5000`);
-const countsQ = db.prepare(`SELECT country, COUNT(*) n FROM builders GROUP BY country`);
+const pointsQ = db.prepare(`SELECT id, kind, name, city, country, also, created_at FROM builders ORDER BY created_at DESC LIMIT 5000`);
+// un nómada cuenta en cada país donde construye
+const countsQ = db.prepare(`SELECT c AS country, COUNT(*) n FROM (
+  SELECT country c FROM builders UNION ALL SELECT j.value FROM builders, json_each(builders.also) j) GROUP BY c`);
+// crecimiento: registros por día, en hora de Bogotá
+const growthQ = db.prepare(`SELECT date(created_at / 1000, 'unixepoch', '-5 hours') d, COUNT(*) n FROM builders GROUP BY d ORDER BY d`);
 const totalQ = db.prepare(`SELECT COUNT(*) n FROM builders`);
 // Reservas y cobros: las credenciales y el estado de pago permanecen en el servidor.
 db.exec(`CREATE TABLE IF NOT EXISTS merch_orders (
@@ -156,7 +162,13 @@ function persistWithEmail(write) {
 // El correo no se expone públicamente; se transmite a Brevo para confirmaciones transaccionales.
 function publicView(r) {
   return { id: r.id, n: r.n, kind: r.kind || "person", name: r.name, company: r.company || "", country: r.country, city: r.city || "",
-    building: r.building || "", website: r.website || "", handle: r.handle || "", ts: r.created_at };
+    also: alsoOf(r), building: r.building || "", website: r.website || "", handle: r.handle || "", ts: r.created_at };
+}
+function alsoOf(r) { try { const a = JSON.parse(r.also || "[]"); return Array.isArray(a) ? a.filter(c => COUNTRIES.has(c)) : []; } catch { return []; } }
+// hasta 4 países adicionales válidos, sin repetir el principal
+function cleanAlso(v, primary) {
+  const list = Array.isArray(v) ? v : typeof v === "string" ? v.split(",") : [];
+  return [...new Set(list.map(c => clean(String(c), 2).toUpperCase()))].filter(c => COUNTRIES.has(c) && c !== primary).slice(0, 4);
 }
 
 function state() {
@@ -164,7 +176,8 @@ function state() {
     total: totalQ.get().n,
     byCountry: Object.fromEntries(countsQ.all().map(r => [r.country, r.n])),
     recent: recentQ.all().map(publicView),
-    points: pointsQ.all().map(r => ({ id: r.id, kind: r.kind || "person", name: r.name, city: r.city || "", country: r.country, ts: r.created_at })),
+    points: pointsQ.all().map(r => ({ id: r.id, kind: r.kind || "person", name: r.name, city: r.city || "", country: r.country, also: alsoOf(r), ts: r.created_at })),
+    growth: growthQ.all().map(r => [r.d, r.n]),
     ...presence(),
     merchPayments: merchPayments(),
   };
@@ -234,12 +247,12 @@ async function register(req, res) {
   if (existing) return json(res, 200, { ok: true, existing: true, builder: publicView(existing) });
 
   const row = {
-    id: randomUUID(), kind, name, company: kind === "person" ? clean(b.company, 80) : "", email, country, website,
+    id: randomUUID(), kind, name, company: kind === "person" ? clean(b.company, 80) : "", email, country, also: JSON.stringify(cleanAlso(b.also, country)), website,
     city: clean(b.city, 60), building: clean(b.building, 140), handle: clean(b.handle, 30).replace(/^@/, ""),
     ip, created_at: Date.now(),
   };
   persistWithEmail(() => {
-    insert.run(row.id, row.kind, row.name, row.company, row.email, row.country, row.city, row.building, row.website, row.handle, row.ip, row.created_at);
+    insert.run(row.id, row.kind, row.name, row.company, row.email, row.country, row.also, row.city, row.building, row.website, row.handle, row.ip, row.created_at);
     EMAIL.enqueue("registered", row);
   });
   const pub = publicView({ ...row, n: numberQ.get(row.id).n });
