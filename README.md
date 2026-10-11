@@ -42,6 +42,29 @@ Antes de entregar la URL al comprador, el servidor consulta el charge recién cr
 
 Pruebas aisladas: `node --test tests/*.test.mjs`. No usan claves reales, red del proveedor ni la base activa. Documentación oficial: [inicio API](https://docs.hel.io/reference/getting-started), [charges](https://docs.hel.io/reference/charge/create), [consulta de charge](https://docs.hel.io/reference/charge/retrieve), [firmas de webhook](https://docs.hel.io/docs/webhooks).
 
+## Archivos en Amazon S3
+
+El backend dispone de `S3Storage` en `lib/storage.mjs` para guardar y leer objetos del bucket privado `latamacc` en `us-east-1`. Las credenciales viven en `~/.config/latamacc/s3.json`, fuera de Git, con permisos **600** (carpeta 700):
+
+```json
+{"AWS_ACCESS_KEY_ID":"ACCESS_KEY","AWS_SECRET_ACCESS_KEY":"SECRET_KEY","AWS_REGION":"us-east-1","AWS_S3_BUCKET":"latamacc","AWS_ACCOUNT_ID":"ACCOUNT_ID_12_DIGITS","AWS_IAM_USER":"LatamaccApp"}
+```
+
+`S3_CONFIG_FILE` permite otra ruta privada. También se aceptan esas variables de entorno, con prioridad sobre el archivo, y `AWS_SESSION_TOKEN` para credenciales temporales. Las llamadas comprueban el propietario esperado (`AWS_ACCOUNT_ID`). Las subidas solicitan cifrado AES256, no asignan ACL pública y rechazan sobrescribir objetos existentes por defecto. La privacidad efectiva depende también de las políticas del bucket. El SDK oficial aplica firma y transporte HTTPS; las claves nunca se envían al navegador.
+
+Comandos de administración desde el servidor:
+
+```sh
+node scripts/storage.mjs check
+node scripts/storage.mjs probe
+node scripts/storage.mjs put /ruta/archivo.pdf documentos/archivo.pdf application/pdf
+node scripts/storage.mjs get documentos/archivo.pdf /ruta/nueva-copia.pdf
+```
+
+`check` consulta acceso al bucket; `probe` sube un texto sintético, comprueba lectura/cifrado y elimina únicamente ese objeto de prueba. Si falta permiso de borrado, devuelve código 1, `cleanedUp: false` y la clave sintética que quedó pendiente, aunque lectura y escritura hayan funcionado. La herramienta no sobrescribe archivos locales al descargar. Requiere `s3:ListBucket` para `check`, `s3:PutObject`/`s3:GetObject` para almacenar y leer, y `s3:DeleteObject` (o `s3:DeleteObjectVersion` con versionado) para limpiar la prueba.
+
+Después de configurar, reiniciar `latamacc-web`. `/api/health` sólo expone `s3: true/false`: indica configuración cargada, no una comprobación continua de conectividad. Sin configuración, el sitio sigue funcionando. No hay un endpoint público de subida ni migración automática de SQLite o sus respaldos; los flujos futuros pueden usar el módulo desde el backend. Pruebas aisladas: `node --test tests/storage.test.mjs`. Referencia: [AWS SDK para S3](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/javascript_s3_code_examples.html).
+
 ## Correr
 
 ```sh

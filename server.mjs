@@ -7,11 +7,16 @@ import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "node:crypt
 import { DatabaseSync } from "node:sqlite";
 import { WebSocketServer } from "ws";
 import { loadMoonpayConfig, MoonpayCommerce, USD_ID, validateCharge, verifyWebhook } from "./lib/moonpay.mjs";
+import { loadStorageConfig, S3Storage } from "./lib/storage.mjs";
 
 const ROOT = new URL(".", import.meta.url).pathname;
 const PUBLIC = join(ROOT, "public");
 const PORT = Number(process.env.PORT || 8790);
 const HOST = process.env.HOST || "127.0.0.1";
+const STORAGE = (() => {
+  try { const config = loadStorageConfig(); return config ? new S3Storage(config) : null; }
+  catch { console.error("S3 configuration unavailable."); return null; }
+})();
 
 const COUNTRIES = new Set(
   JSON.parse(readFileSync(join(PUBLIC, "assets/latam.json"), "utf8")).countries.filter(c => !c.deco).map(c => c.code)
@@ -155,7 +160,7 @@ function presence() {
 function health() {
   return { ok: true, builders: totalQ.get().n, dbBytes: statSync(DB_FILE).size, journal: db.prepare("PRAGMA journal_mode").get().journal_mode,
     lastBackup: lastBackup && { at: new Date(lastBackup.at).toISOString(), builders: lastBackup.builders, preorders: lastBackup.orders }, preorders: ordersQ.get().n,
-    turnstile: !!TURNSTILE, moonpay: !!MOONPAY, online: wss.clients.size };
+    turnstile: !!TURNSTILE, moonpay: !!MOONPAY, s3: !!STORAGE, online: wss.clients.size };
 }
 
 const clean = (v, max) => (typeof v === "string" ? v.replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, max) : "");
@@ -397,6 +402,6 @@ wss.on("connection", (ws, req) => {
 // Mantiene vivas las conexiones a través del túnel.
 setInterval(() => { for (const c of wss.clients) if (c.readyState === 1) c.ping(); }, 25_000);
 
-for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { backup(); db.close(); process.exit(0); });
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { backup(); db.close(); STORAGE?.close(); process.exit(0); });
 
 server.listen(PORT, HOST, () => console.log(`latamacc en http://${HOST}:${server.address().port}`));

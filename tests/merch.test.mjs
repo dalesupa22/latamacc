@@ -25,7 +25,7 @@ async function launch(dir, config, mock = false) {
         paylinkTx:state.paid?{id:state.txId||('tx-'+token),paylinkId:'test-paylink',quantity:1,paymentType:'PAYLINK',fee:'980000',meta:{transactionStatus:'SUCCESS',transactionSignature:'sig-'+token,amount:'97020000',currency:{id:${JSON.stringify(USDC_SOL_ID)}},recipientPK:state.wrongRecipient?'WrongWallet':'MainWallet'}}:null});};`;
   const args = mock ? ["--import", `data:text/javascript;base64,${Buffer.from(preload).toString("base64")}`, "server.mjs"] : ["server.mjs"];
   const child = spawn(process.execPath, args, { cwd: new URL("..", import.meta.url).pathname,
-    env: { ...process.env, PORT: "0", HOST: "127.0.0.1", DATA_DIR: dir, MOONPAY_FILE: configFile, TURNSTILE_FILE: join(dir, "no-turnstile") }, stdio: ["ignore", "pipe", "pipe"] });
+    env: { ...process.env, PORT: "0", HOST: "127.0.0.1", DATA_DIR: dir, MOONPAY_FILE: configFile, TURNSTILE_FILE: join(dir, "no-turnstile"), S3_CONFIG_FILE: join(dir, "no-s3") }, stdio: ["ignore", "pipe", "pipe"] });
   let output = ""; child.stdout.on("data", c => output += c); child.stderr.on("data", c => output += c);
   const deadline = Date.now() + 10_000;
   while (!/latamacc en http/.test(output)) {
@@ -48,6 +48,7 @@ test("HTTP reservations without MoonPay preserve data, reject invalid product/qt
     const s = await fetch(app.base + "/api/state").then(r => r.json());
     assert.deepEqual(s.merchPayments, { tee: false, "tee-white": false, cap: false, "cap-navy": false });
     assert.equal((await fetch(app.base + "/api/health").then(r => r.json())).moonpay, false);
+    assert.equal((await fetch(app.base + "/api/health").then(r => r.json())).s3, false);
     await new Promise(r => setTimeout(r, 3050));
     for (const qty of [1.5, 0, 11, "bad"]) assert.equal((await post(app.base, { ...body, qty, ft: s.ft })).status, 400);
     assert.equal((await post(app.base, { ...body, item: "__proto__", ft: s.ft })).status, 400);
