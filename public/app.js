@@ -483,6 +483,8 @@ function connect() {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type === "hello" || m.type === "presence") { setOnline(m.online); S.watching = m.watching || {}; }
     else if (m.type === "join") onJoin(m.builder, m.total);
+    else if (m.type === "update" || m.type === "remove") { refreshState(); loadDir(); if (m.type === "remove") loadJobs(); }
+    else if (m.type === "jobs") { loadJobs(); patchEntry(m.builder); }
     else if (m.type === "spark" && S.map) flare(m.x * S.map.w, m.y * S.map.h, null, false);
   };
   ws.onclose = () => { setTimeout(connect, wsDelay); wsDelay = Math.min(wsDelay * 2, 15000); };
@@ -513,6 +515,25 @@ function onJoin(b, total) {
   if (matchesFilter(b)) { dir.entries.unshift(b); renderDir(); }
 }
 
+// un perfil editado o eliminado: se recargan conteos y luces sin reiniciar el mapa
+async function refreshState() {
+  let st;
+  try { st = await fetch("/api/state").then(r => r.json()); } catch { return; }
+  Object.assign(S, { total: st.total, byCountry: st.byCountry, recent: st.recent, growth: st.growth || [] });
+  const want = new Map();
+  for (const b of st.points) for (const cc of countriesOf(b)) want.set(`${b.id}|${cc}`, b);
+  S.points = S.points.filter(p => { const b = want.get(`${p.id}|${p.country}`); if (b) { p.name = b.name; p.kind = b.kind; p.city = p.country === b.country ? b.city : ""; } return !!b; });
+  const have = new Set(S.points.map(p => `${p.id}|${p.country}`));
+  for (const [key, b] of want) if (!have.has(key)) { const pt = placePoint(b, key.split("|")[1]); if (pt) S.points.push(pt); }
+  S.seen = new Set(st.points.map(b => b.id));
+  renderStats(); renderFeed(false); renderBoard(); renderGrowth(); renderChips();
+  if (panelCC) openCountry(panelCC);
+}
+function patchEntry(b) {
+  if (!b) return;
+  const i = dir.entries.findIndex(e => e.id === b.id);
+  if (i >= 0) { dir.entries[i] = b; renderDir(); }
+}
 // ---------- UI ----------
 const cname = cc => S.byCode[cc]?.en || cc;
 function countUp(el, to) {
@@ -530,6 +551,12 @@ const ago = ts => { const s = (Date.now() - ts) / 1000; return s < 60 ? "just no
 const safeUrl = u => /^https?:\/\//i.test(u || "") ? u : "";
 const host = u => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
 const subtitle = b => b.kind === "company" ? "Company" : b.company ? `@ ${b.company}` : "";
+const mediaUrl = u => /^\/media\/avatars\/[0-9a-f/-]+\.(png|jpg|webp)$/.test(u || "") ? u : "";
+// foto o logo; sin imagen, la inicial sobre dorado
+function avatar(b, cls = "") {
+  const src = mediaUrl(b.avatar), initial = esc([...(b.name || "?").replace(/^@/, "")][0]?.toUpperCase() || "?");
+  return `<span class="avatar ${cls} ${b.kind === "company" ? "co" : ""}">${src ? `<img src="${src}" alt="" loading="lazy" decoding="async" />` : initial}</span>`;
+}
 
 function renderFeed(isNew) {
   const ol = $("#feed");
@@ -600,7 +627,7 @@ function renderDir() {
   ul.innerHTML = dir.entries.map(b => {
     const site = safeUrl(b.website);
     return `<li class="card">
-      <div class="card-top"><span class="flag">${flag(b.country)}</span><span class="badge ${b.kind}">${b.kind === "company" ? "Company" : "Person"}</span><small class="mono">#${b.n}</small></div>
+      <div class="card-top">${avatar(b)}<span class="flag">${flag(b.country)}</span><span class="badge ${b.kind}">${b.kind === "company" ? "Company" : "Person"}</span>${b.hiring ? `<button class="badge hiring" type="button" data-hiring="${esc(b.name)}">Hiring · ${b.hiring}</button>` : ""}<small class="mono">#${b.n}</small></div>
       <b>${esc(b.name)}</b>${b.kind === "person" && b.company ? `<span class="co">${esc(b.company)}</span>` : ""}
       ${b.building ? `<p>${esc(b.building)}</p>` : ""}
       ${b.also?.length ? `<span class="also-flags">Also in ${b.also.map(flag).join(" ")}</span>` : ""}
@@ -621,6 +648,12 @@ function filterCountry(cc) {
 }
 $("#q").addEventListener("input", e => { dir.q = e.target.value.trim(); clearTimeout(dirTimer); dirTimer = setTimeout(loadDir, 200); });
 document.querySelectorAll('input[name="fkind"]').forEach(r => r.addEventListener("change", e => { dir.kind = e.target.value; loadDir(); }));
+$("#dir").addEventListener("click", e => {
+  const name = e.target.closest("[data-hiring]")?.dataset.hiring;
+  if (!name) return;
+  jobs.q = name; $("#jq").value = name; loadJobs();
+  document.getElementById("jobs").scrollIntoView({ behavior: "smooth" });
+});
 $("#country-chips").addEventListener("click", e => {
   const li = e.target.closest("li"); if (!li) return;
   const cc = li.dataset.cc;
@@ -631,38 +664,40 @@ $("#country-chips").addEventListener("click", e => {
 
 // ---------- formulario ----------
 const form = $("#form");
-function buildAlso() {
-  const grid = $("#also-grid");
+// países adicionales (nómadas) y etiquetas persona/empresa, compartidos por el registro y la edición del perfil
+function buildAlso(f = form) {
+  const grid = f.querySelector(".also-grid");
   grid.innerHTML = S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en))
     .map(c => `<label><input type="checkbox" value="${c.code}" /> ${flag(c.code)} ${esc(c.en)}</label>`).join("");
-  syncAlso();
+  grid.addEventListener("change", () => syncAlso(f));
+  f.country.addEventListener("change", () => syncAlso(f));
+  syncAlso(f);
 }
-function syncAlso() {
-  const boxes = [...$("#also-grid").querySelectorAll("input")];
+function syncAlso(f = form) {
+  const boxes = [...f.querySelectorAll(".also-grid input")];
   const full = boxes.filter(b => b.checked).length >= 4;
   for (const b of boxes) {
-    if (b.value === form.country.value) b.checked = false;
-    b.disabled = b.value === form.country.value || (full && !b.checked);
+    if (b.value === f.country.value) b.checked = false;
+    b.disabled = b.value === f.country.value || (full && !b.checked);
     b.parentElement.classList.toggle("off", b.disabled);
   }
 }
-$("#also-grid").addEventListener("change", syncAlso);
-form.country.addEventListener("change", syncAlso);
-function syncKind() {
-  const company = form.kind.value === "company";
-  $("#name-label").textContent = company ? "Company name" : "Your name or username";
-  form.name.placeholder = company ? "Acme AI" : "Ana Pérez or @ana";
-  form.name.autocomplete = company ? "organization" : "nickname";
-  $("#building-label").textContent = company ? "What does the company build?" : "What are you building?";
-  form.querySelector(".person-only").hidden = company;
+const alsoOf = f => [...f.querySelectorAll(".also-grid input:checked")].map(b => b.value);
+function syncKind(f = form) {
+  const company = f.kind.value === "company";
+  f.querySelector("#name-label, .name-label").textContent = company ? "Company name" : "Your name or username";
+  f.name.placeholder = company ? "Acme AI" : "Ana Pérez or @ana";
+  f.name.autocomplete = company ? "organization" : "nickname";
+  f.querySelector("#building-label, .building-label").textContent = company ? "What does the company build?" : "What are you building?";
+  f.querySelector(".person-only").hidden = company;
 }
-form.querySelectorAll('input[name="kind"]').forEach(r => r.addEventListener("change", syncKind));
+form.querySelectorAll('input[name="kind"]').forEach(r => r.addEventListener("change", () => syncKind()));
 
 form.addEventListener("submit", async e => {
   e.preventDefault();
   const msg = $("#form-msg"), btn = $("#submit");
   const data = Object.fromEntries(new FormData(form));
-  data.also = [...$("#also-grid").querySelectorAll("input:checked")].map(b => b.value);
+  data.also = alsoOf(form);
   msg.className = "form-msg"; msg.textContent = "";
   if (!data.name.trim() || !data.email.includes("@") || !data.country) { msg.className = "form-msg err"; msg.textContent = "Please add a name, email and country."; return; }
   btn.disabled = true; btn.textContent = "Joining…";
@@ -671,7 +706,7 @@ form.addEventListener("submit", async e => {
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || "Could not register.");
     showDone(j.builder, j.existing);
-    if (j.existing) return;
+    if (j.existing) { if (j.canEdit) toast("Already in the directory. Use Edit profile to change it."); return; }
     form.reset(); syncKind(); syncAlso(); $("#also").open = false;
     window.scrollTo({ top: 0, behavior: "smooth" });
     // si el socket no llegó, se pinta localmente
@@ -692,6 +727,183 @@ function showDone(b, existing) {
   form.hidden = true; $("#done").hidden = false;
 }
 $("#done-again").addEventListener("click", () => { $("#done").hidden = true; form.hidden = false; $("#form-msg").textContent = ""; });
+
+// ---------- empleos ----------
+const jobs = { list: [], q: "", country: "", workplace: "", type: "" };
+const WORK = { remote: "Remote", hybrid: "Hybrid", onsite: "On-site" };
+const TYPES = { "full-time": "Full-time", "part-time": "Part-time", contract: "Contract", internship: "Internship" };
+const applyUrl = u => /^(https?:\/\/|mailto:)/i.test(u || "") ? u : "";
+const where = j => [j.city, j.country ? `${flag(j.country)} ${cname(j.country)}` : "Anywhere in Latam"].filter(Boolean).join(", ");
+function jobCard(j, mine = false) {
+  const apply = applyUrl(j.apply);
+  return `<li class="job">
+    <div class="job-top">${avatar(j.poster)}<div><b>${esc(j.title)}</b><span>${esc(j.company || j.poster.name)}${j.company && j.company !== j.poster.name ? ` · posted by ${esc(j.poster.name)}` : ""}</span></div></div>
+    <div class="job-tags"><span class="badge">${WORK[j.workplace] || ""}</span><span class="badge">${TYPES[j.type] || ""}</span><span class="job-where">${esc(where(j))}</span>${j.salary ? `<span class="job-where">· ${esc(j.salary)}</span>` : ""}</div>
+    ${j.description ? `<p>${esc(j.description)}</p>` : ""}
+    <div class="card-foot"><span>${ago(j.ts)}</span>${mine
+      ? `<button class="btn small" type="button" data-close-job="${esc(j.id)}">Close job</button>`
+      : apply ? `<a class="btn small primary" href="${esc(apply)}" target="_blank" rel="noopener nofollow">Apply ↗</a>` : ""}</div>
+  </li>`;
+}
+async function loadJobs() {
+  const qs = new URLSearchParams({ q: jobs.q, country: jobs.country, workplace: jobs.workplace, type: jobs.type });
+  try { jobs.list = (await fetch("/api/jobs?" + qs).then(r => r.json())).jobs || []; } catch { jobs.list = []; }
+  const filtered = jobs.q || jobs.country || jobs.workplace || jobs.type;
+  $("#jobs-list").innerHTML = jobs.list.length ? jobs.list.map(j => jobCard(j)).join("")
+    : `<li class="empty">${filtered ? "No open roles match these filters." : "No open roles yet. Members can post jobs for free."} <button class="linkish" type="button" data-me="jobs">Post a job →</button></li>`;
+}
+let jobsTimer;
+$("#jq").addEventListener("input", e => { jobs.q = e.target.value.trim(); clearTimeout(jobsTimer); jobsTimer = setTimeout(loadJobs, 200); });
+$("#jcountry").addEventListener("change", e => { jobs.country = e.target.value; loadJobs(); });
+$("#jtype").addEventListener("change", e => { jobs.type = e.target.value; loadJobs(); });
+document.querySelectorAll('input[name="jwork"]').forEach(r => r.addEventListener("change", e => { jobs.workplace = e.target.value; loadJobs(); }));
+
+// ---------- miembros: enlace por correo, editar perfil, foto/logo y empleos ----------
+const dlg = $("#me"), pform = $("#pform"), jform = $("#jform"), signin = $("#signin");
+const member = { session: "", me: null, editing: true, uploads: true };
+try { member.session = localStorage.getItem("latamacc-session") || ""; } catch {}
+function saveSession(v) { member.session = v; try { v ? localStorage.setItem("latamacc-session", v) : localStorage.removeItem("latamacc-session"); } catch {} }
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { authorization: `Bearer ${member.session}`, ...(opts.json ? { "content-type": "application/json" } : {}), ...opts.headers },
+    body: opts.json ? JSON.stringify(opts.json) : opts.body });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { saveSession(""); member.me = null; showMe(); }
+  if (!r.ok) throw new Error(j.error || "Something went wrong. Please try again.");
+  if (j.me) { member.me = j.me; renderMe(); }
+  return j;
+}
+function setTab(tab) {
+  $("#me-profile").hidden = tab !== "profile"; $("#me-jobs").hidden = tab !== "jobs";
+  dlg.querySelector(`input[name="metab"][value="${tab}"]`).checked = true;
+}
+function showMe(tab) {
+  const signed = !!(member.session && member.me);
+  $("#me-signin").hidden = signed; $("#me-main").hidden = !signed;
+  if (signed && tab) setTab(tab);
+}
+async function openMe(tab = "profile") {
+  if (!dlg.open) dlg.showModal();
+  if (member.session && !member.me) { try { await api("/api/me"); } catch {} }
+  showMe(tab);
+  if (!member.me) {
+    const m = signin.querySelector(".form-msg");
+    m.className = "form-msg"; m.textContent = tab === "jobs" ? "Jobs are posted by directory members. Sign in to post one." : "";
+    if (!member.editing) { m.className = "form-msg err"; m.textContent = "Email sign-in opens very soon. Please check back later."; }
+  }
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-me]");
+  if (b) { e.preventDefault(); openMe(b.dataset.me); }
+  if (e.target.closest("[data-close]")) dlg.close();
+});
+$("#me-close").addEventListener("click", () => dlg.close());
+dlg.addEventListener("click", e => { if (e.target === dlg) dlg.close(); });
+dlg.querySelectorAll('input[name="metab"]').forEach(r => r.addEventListener("change", e => setTab(e.target.value)));
+function renderMe() {
+  const m = member.me;
+  if (!m) return;
+  $("#me-avatar").outerHTML = avatar(m, "big").replace('class="avatar', 'id="me-avatar" class="avatar');
+  $("#photo-preview").outerHTML = avatar(m).replace('class="avatar', 'id="photo-preview" class="avatar');
+  $("#me-name").textContent = m.name;
+  $("#me-n").textContent = `${m.kind === "company" ? "Company" : "Member"} #${m.n}`;
+  $("#me-email").textContent = `Signed in as ${m.email} (private)`;
+  $("#photo-label").textContent = m.kind === "company" ? "Logo" : "Photo";
+  $("#photo-remove").hidden = !m.avatar;
+  $("#photo-file").disabled = !member.uploads;
+  $("#me-profile .photo").hidden = !member.uploads && !m.avatar;
+  pform.kind.value = m.kind;
+  for (const k of ["name", "company", "country", "city", "building", "website", "handle"]) pform[k].value = m[k] || "";
+  for (const b of pform.querySelectorAll(".also-grid input")) b.checked = m.also.includes(b.value);
+  pform.querySelector(".also").open = m.also.length > 0;
+  syncKind(pform); syncAlso(pform);
+  $("#my-jobs").innerHTML = m.jobs.length ? `<li class="form-title">Your open jobs</li>` + m.jobs.map(j => jobCard(j, true)).join("") : "";
+}
+function formMsg(f, text, ok = false) { const m = f.querySelector(".form-msg"); m.className = `form-msg ${ok ? "ok" : "err"}`; m.textContent = text; }
+signin.addEventListener("submit", async e => {
+  e.preventDefault();
+  const btn = signin.querySelector("button[type=submit]"), data = Object.fromEntries(new FormData(signin));
+  if (!data.email.includes("@")) return formMsg(signin, "Add the email you joined with.");
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/signin/link", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(guarded(data, "signin")) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "Could not send the link.");
+    formMsg(signin, "Check your inbox ✦ If that email is in the directory, a sign-in link is on its way. It works once, for 24 hours.", true);
+  } catch (err) { formMsg(signin, err.message); }
+  finally { btn.disabled = false; resetGuard("signin"); }
+});
+pform.querySelectorAll('input[name="kind"]').forEach(r => r.addEventListener("change", () => syncKind(pform)));
+pform.addEventListener("submit", async e => {
+  e.preventDefault();
+  const btn = pform.querySelector("button[type=submit]"), data = Object.fromEntries(new FormData(pform));
+  data.also = alsoOf(pform);
+  btn.disabled = true;
+  try { await api("/api/me", { method: "POST", json: data }); formMsg(pform, "Saved ✦ Your profile is updated for everyone.", true); }
+  catch (err) { formMsg(pform, err.message); }
+  finally { btn.disabled = false; }
+});
+// la imagen se reduce en el navegador (máx. 512 px) antes de subirla
+async function shrink(file) {
+  const img = await createImageBitmap(file);
+  const k = Math.min(1, 512 / Math.max(img.width, img.height));
+  const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+  return new Promise(res => c.toBlob(b => res(b), "image/webp", 0.88));
+}
+$("#photo-file").addEventListener("change", async e => {
+  const file = e.target.files[0]; e.target.value = "";
+  if (!file) return;
+  const m = $("#me-profile .form-msg");
+  m.className = "form-msg"; m.textContent = "Uploading…";
+  try {
+    let blob = file;
+    try { blob = (await shrink(file)) || file; } catch {}
+    await api("/api/me/avatar", { method: "POST", body: blob, headers: { "content-type": blob.type || "application/octet-stream" } });
+    formMsg(pform, `${member.me.kind === "company" ? "Logo" : "Photo"} updated ✦`, true);
+  } catch (err) { formMsg(pform, err.message); }
+});
+$("#photo-remove").addEventListener("click", async () => {
+  try { await api("/api/me/avatar", { method: "DELETE" }); formMsg(pform, "Removed.", true); } catch (err) { formMsg(pform, err.message); }
+});
+jform.workplace.addEventListener("change", () => { jform.country.options[0].text = jform.workplace.value === "remote" ? "Anywhere in Latam (remote)" : "Select a country"; });
+jform.addEventListener("submit", async e => {
+  e.preventDefault();
+  const btn = jform.querySelector("button[type=submit]"), data = Object.fromEntries(new FormData(jform));
+  btn.disabled = true;
+  try {
+    await api("/api/me/jobs", { method: "POST", json: data });
+    jform.reset(); formMsg(jform, "Published ✦ Your job is live in the Jobs section.", true); loadJobs();
+  } catch (err) { formMsg(jform, err.message); }
+  finally { btn.disabled = false; }
+});
+$("#my-jobs").addEventListener("click", async e => {
+  const id = e.target.closest("[data-close-job]")?.dataset.closeJob;
+  if (!id || !confirm("Close this job? It will disappear from the Jobs section.")) return;
+  try { await api(`/api/me/jobs/${id}/close`, { method: "POST" }); loadJobs(); } catch (err) { toast(err.message); }
+});
+$("#me-signout").addEventListener("click", async () => {
+  try { await api("/api/me/signout", { method: "POST" }); } catch {}
+  saveSession(""); member.me = null; showMe(); toast("Signed out.");
+});
+$("#me-delete").addEventListener("click", async () => {
+  if (!confirm("Remove your profile from the directory? Your light, profile and jobs will be deleted. This can't be undone.")) return;
+  try { await api("/api/me", { method: "DELETE" }); saveSession(""); member.me = null; dlg.close(); toast("Your profile was removed."); }
+  catch (err) { toast(err.message); }
+});
+// enlace del correo: latamacc.si/#signin=TOKEN (el fragmento nunca llega al servidor ni a los logs)
+async function consumeSignin() {
+  const m = /^#signin=([A-Za-z0-9_-]{43})$/.exec(location.hash);
+  if (!m) return;
+  history.replaceState(null, "", location.pathname + location.search);
+  if (!dlg.open) dlg.showModal();
+  try {
+    const r = await fetch("/api/signin", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: m[1] }) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "Could not sign in.");
+    saveSession(j.session); member.me = j.me; renderMe(); showMe("profile");
+    toast("Signed in ✦ Edit your profile below.");
+  } catch (err) { showMe(); formMsg(signin, err.message); }
+}
 
 // ---------- anti-bots ----------
 // ft: token firmado del servidor al cargar; Turnstile solo si el servidor tiene clave.
@@ -874,7 +1086,10 @@ addEventListener("resize", layout);
   S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => sel.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));
 
   S.total = state.total; S.byCountry = state.byCountry; S.recent = state.recent; S.watching = state.watching || {}; S.growth = state.growth || [];
-  buildAlso();
+  buildAlso(form); buildAlso(pform);
+  for (const sel2 of [pform.country, jform.country, $("#jcountry")])
+    S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => sel2.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));
+  member.editing = state.editing !== false; member.uploads = state.uploads !== false;
   setOnline(state.online || 1);
   const psel = $("#po-country");
   S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => psel.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));
@@ -895,7 +1110,8 @@ addEventListener("resize", layout);
     }
   });
   renderStats(); renderFeed(false); renderBoard(); renderGrowth(); renderChips(); syncKind();
-  loadDir();
+  loadDir(); loadJobs(); consumeSignin();
+  addEventListener("hashchange", consumeSignin);
   connect();
   requestAnimationFrame(frame);
 })();

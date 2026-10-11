@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { mkdirSync, readFileSync, readdirSync, rmSync, chmodSync, statSync, existsSync, writeFileSync } from "node:fs";
 import { join, extname, normalize } from "node:path";
-import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "node:crypto";
+import { randomUUID, randomBytes, createHmac, createHash, timingSafeEqual } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { WebSocketServer } from "ws";
 import { loadMoonpayConfig, MoonpayCommerce, USD_ID, validateCharge, verifyWebhook } from "./lib/moonpay.mjs";
@@ -35,16 +35,32 @@ db.exec(`CREATE TABLE IF NOT EXISTS builders (
 // Columnas del directorio (migración en caliente para bases existentes).
 const cols = new Set(db.prepare("PRAGMA table_info(builders)").all().map(c => c.name));
 // also: otros países donde también construye (nómadas), como arreglo JSON de códigos.
-for (const [col, def] of [["kind", "TEXT NOT NULL DEFAULT 'person'"], ["company", "TEXT"], ["website", "TEXT"], ["also", "TEXT NOT NULL DEFAULT '[]'"]])
+// avatar: clave en S3 de la foto o logo; updated_at: última edición del perfil.
+for (const [col, def] of [["kind", "TEXT NOT NULL DEFAULT 'person'"], ["company", "TEXT"], ["website", "TEXT"], ["also", "TEXT NOT NULL DEFAULT '[]'"],
+  ["avatar", "TEXT"], ["updated_at", "INTEGER"]])
   if (!cols.has(col)) db.exec(`ALTER TABLE builders ADD COLUMN ${col} ${def}`);
+// Empleos publicados por miembros; vencen a los 60 días o cuando su autor los cierra.
+db.exec(`CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY, builder_id TEXT NOT NULL, title TEXT NOT NULL, company TEXT, country TEXT, city TEXT,
+  workplace TEXT NOT NULL, type TEXT NOT NULL, salary TEXT, description TEXT, apply TEXT NOT NULL,
+  created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, closed_at INTEGER);
+  CREATE INDEX IF NOT EXISTS jobs_builder ON jobs(builder_id);
+  CREATE INDEX IF NOT EXISTS jobs_open ON jobs(closed_at, expires_at);`);
+// Acceso de miembros sin contraseña: enlace por correo (un uso, 24 h) que se canjea por una sesión (30 días).
+// Solo se guarda el hash SHA-256 de cada token.
+db.exec(`CREATE TABLE IF NOT EXISTS member_tokens (
+  hash TEXT PRIMARY KEY, builder_id TEXT NOT NULL, kind TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+  CREATE INDEX IF NOT EXISTS member_tokens_builder ON member_tokens(builder_id);`);
+const HIRING = `(SELECT COUNT(*) FROM jobs WHERE jobs.builder_id = builders.id AND jobs.closed_at IS NULL AND jobs.expires_at > unixepoch() * 1000) AS hiring`;
 const insert = db.prepare(`INSERT INTO builders (id,kind,name,company,email,country,also,city,building,website,handle,ip,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-const directoryQ = db.prepare(`SELECT rowid AS n, * FROM builders
+const directoryQ = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders
   WHERE (:country = '' OR country = :country OR EXISTS (SELECT 1 FROM json_each(builders.also) j WHERE j.value = :country))
     AND (:kind = '' OR kind = :kind)
     AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like)
   ORDER BY created_at DESC LIMIT 60 OFFSET :offset`);
 const byEmail = db.prepare(`SELECT rowid AS n, * FROM builders WHERE email = ?`);
-const recentQ = db.prepare(`SELECT rowid AS n, * FROM builders ORDER BY created_at DESC LIMIT 30`);
+const byId = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders WHERE id = ?`);
+const recentQ = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders ORDER BY created_at DESC LIMIT 30`);
 const numberQ = db.prepare(`SELECT rowid AS n FROM builders WHERE id = ?`);
 const pointsQ = db.prepare(`SELECT id, kind, name, city, country, also, created_at FROM builders ORDER BY created_at DESC LIMIT 5000`);
 // un nómada cuenta en cada país donde construye
@@ -162,7 +178,8 @@ function persistWithEmail(write) {
 // El correo no se expone públicamente; se transmite a Brevo para confirmaciones transaccionales.
 function publicView(r) {
   return { id: r.id, n: r.n, kind: r.kind || "person", name: r.name, company: r.company || "", country: r.country, city: r.city || "",
-    also: alsoOf(r), building: r.building || "", website: r.website || "", handle: r.handle || "", ts: r.created_at };
+    also: alsoOf(r), building: r.building || "", website: r.website || "", handle: r.handle || "", ts: r.created_at,
+    avatar: r.avatar ? `/media/${r.avatar}` : "", hiring: r.hiring || 0 };
 }
 function alsoOf(r) { try { const a = JSON.parse(r.also || "[]"); return Array.isArray(a) ? a.filter(c => COUNTRIES.has(c)) : []; } catch { return []; } }
 // hasta 4 países adicionales válidos, sin repetir el principal
@@ -176,6 +193,8 @@ function state() {
     total: totalQ.get().n,
     byCountry: Object.fromEntries(countsQ.all().map(r => [r.country, r.n])),
     recent: recentQ.all().map(publicView),
+    jobs: openJobsTotal.get(Date.now()).n,
+    editing: EMAIL.enabled, uploads: !!STORAGE,
     points: pointsQ.all().map(r => ({ id: r.id, kind: r.kind || "person", name: r.name, city: r.city || "", country: r.country, also: alsoOf(r), ts: r.created_at })),
     growth: growthQ.all().map(r => [r.d, r.n]),
     ...presence(),
@@ -231,26 +250,15 @@ async function register(req, res) {
   const human = await humanCheck(b, ip);
   if (human === "bot") return json(res, 200, { ok: true });
   if (human) return json(res, 400, { error: human });
-  const name = clean(b.name, 60);
   const email = clean(b.email, 120).toLowerCase();
-  const country = clean(b.country, 2).toUpperCase();
-  const kind = b.kind === "company" ? "company" : "person";
-  let website = clean(b.website, 120);
-  if (website && !/^https?:\/\//i.test(website)) website = "https://" + website;
-  try { if (website) { const u = new URL(website); if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".")) throw 0; website = u.href; } }
-  catch { return json(res, 400, { error: "That website doesn't look right." }); }
-  if (name.length < 2) return json(res, 400, { error: kind === "company" ? "Add the company name." : "Add your name." });
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json(res, 400, { error: "Invalid email." });
-  if (!COUNTRIES.has(country)) return json(res, 400, { error: "Pick a Latam country." });
+  const profile = parseProfile(b);
+  if (profile.error) return json(res, 400, { error: profile.error });
+  if (!EMAIL_RE.test(email)) return json(res, 400, { error: "Invalid email." });
 
   const existing = byEmail.get(email);
-  if (existing) return json(res, 200, { ok: true, existing: true, builder: publicView(existing) });
+  if (existing) return json(res, 200, { ok: true, existing: true, builder: publicView(existing), canEdit: EMAIL.enabled });
 
-  const row = {
-    id: randomUUID(), kind, name, company: kind === "person" ? clean(b.company, 80) : "", email, country, also: JSON.stringify(cleanAlso(b.also, country)), website,
-    city: clean(b.city, 60), building: clean(b.building, 140), handle: clean(b.handle, 30).replace(/^@/, ""),
-    ip, created_at: Date.now(),
-  };
+  const row = { id: randomUUID(), ...profile, email, ip, created_at: Date.now() };
   persistWithEmail(() => {
     insert.run(row.id, row.kind, row.name, row.company, row.email, row.country, row.also, row.city, row.building, row.website, row.handle, row.ip, row.created_at);
     EMAIL.enqueue("registered", row);
@@ -259,6 +267,212 @@ async function register(req, res) {
   broadcast({ type: "join", builder: pub, total: totalQ.get().n });
   scheduleBackup();
   json(res, 201, { ok: true, builder: pub });
+}
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+// Campos públicos del perfil, compartidos por el registro y la edición.
+function parseProfile(b) {
+  const name = clean(b.name, 60);
+  const country = clean(b.country, 2).toUpperCase();
+  const kind = b.kind === "company" ? "company" : "person";
+  let website = clean(b.website, 120);
+  if (website && !/^https?:\/\//i.test(website)) website = "https://" + website;
+  try { if (website) { const u = new URL(website); if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".")) throw 0; website = u.href; } }
+  catch { return { error: "That website doesn't look right." }; }
+  if (name.length < 2) return { error: kind === "company" ? "Add the company name." : "Add your name." };
+  if (!COUNTRIES.has(country)) return { error: "Pick a Latam country." };
+  return { kind, name, company: kind === "person" ? clean(b.company, 80) : "", country, also: JSON.stringify(cleanAlso(b.also, country)), website,
+    city: clean(b.city, 60), building: clean(b.building, 140), handle: clean(b.handle, 30).replace(/^@/, "") };
+}
+
+// ---------- miembros: enlace por correo, sesión, edición del perfil y foto/logo ----------
+const HOUR = 3600_000, DAY = 24 * HOUR;
+const tokenHash = t => createHash("sha256").update(String(t)).digest("hex");
+const newToken = () => randomBytes(32).toString("base64url");
+const insertToken = db.prepare("INSERT INTO member_tokens (hash,builder_id,kind,created_at,expires_at) VALUES (?,?,?,?,?)");
+const tokenQ = db.prepare("SELECT * FROM member_tokens WHERE hash = ? AND kind = ? AND expires_at > ?");
+const dropToken = db.prepare("DELETE FROM member_tokens WHERE hash = ?");
+const pruneTokens = db.prepare("DELETE FROM member_tokens WHERE expires_at <= ?");
+const updateProfile = db.prepare(`UPDATE builders SET kind=?, name=?, company=?, country=?, also=?, city=?, building=?, website=?, handle=?, updated_at=? WHERE id=?`);
+const setAvatar = db.prepare("UPDATE builders SET avatar = ?, updated_at = ? WHERE id = ?");
+setInterval(() => pruneTokens.run(Date.now()), HOUR).unref();
+
+function sessionOf(req) {
+  const m = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(String(req.headers.authorization || ""));
+  const t = m && tokenQ.get(tokenHash(m[1]), "session", Date.now());
+  return t ? byId.get(t.builder_id) || null : null;
+}
+const myJobsQ = db.prepare("SELECT * FROM jobs WHERE builder_id = ? AND closed_at IS NULL AND expires_at > ? ORDER BY created_at DESC");
+const me = r => ({ ...publicView(r), email: r.email, jobs: myJobsQ.all(r.id, Date.now()).map(j => jobView(j, r)) });
+
+async function requestLink(req, res) {
+  const ip = clientIp(req);
+  if (limited("link:" + ip, 5, 15 * 60_000)) return json(res, 429, { error: "Too many attempts, please wait a few minutes." });
+  let b;
+  try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
+  const human = await humanCheck(b, ip);
+  if (human === "bot") return json(res, 200, { ok: true });
+  if (human) return json(res, 400, { error: human });
+  const email = clean(b.email, 120).toLowerCase();
+  if (!EMAIL_RE.test(email)) return json(res, 400, { error: "Invalid email." });
+  if (!EMAIL.enabled) return json(res, 503, { error: "Email sign-in is not available yet. Please try again soon." });
+  const builder = byEmail.get(email);
+  // La respuesta es la misma exista o no el correo, para no revelar quién está en el directorio.
+  if (builder) {
+    const token = newToken(), now = Date.now();
+    persistWithEmail(() => {
+      insertToken.run(tokenHash(token), builder.id, "link", now, now + DAY);
+      EMAIL.enqueue("login", { id: randomUUID(), email, link: `https://latamacc.si/#signin=${token}` });
+    });
+  }
+  json(res, 200, { ok: true });
+}
+
+async function startSession(req, res) {
+  if (limited("session:" + clientIp(req), 20)) return json(res, 429, { error: "Too many attempts, please wait a minute." });
+  let b;
+  try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
+  const link = /^[A-Za-z0-9_-]{43}$/.test(b.token || "") && tokenQ.get(tokenHash(b.token), "link", Date.now());
+  // un enlace se usa una sola vez
+  if (!link || !dropToken.run(link.hash).changes) return json(res, 401, { error: "This sign-in link has expired or was already used. Request a new one." });
+  const builder = byId.get(link.builder_id);
+  if (!builder) return json(res, 401, { error: "This profile no longer exists." });
+  const session = newToken(), now = Date.now();
+  insertToken.run(tokenHash(session), builder.id, "session", now, now + 30 * DAY);
+  json(res, 200, { ok: true, session, me: me(builder) });
+}
+
+async function saveProfile(req, res, builder) {
+  if (limited("edit:" + builder.id, 30)) return json(res, 429, { error: "Too many changes, please wait a minute." });
+  let b;
+  try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
+  const p = parseProfile(b);
+  if (p.error) return json(res, 400, { error: p.error });
+  updateProfile.run(p.kind, p.name, p.company, p.country, p.also, p.city, p.building, p.website, p.handle, Date.now(), builder.id);
+  scheduleBackup();
+  const row = byId.get(builder.id);
+  broadcast({ type: "update", builder: publicView(row) });
+  json(res, 200, { ok: true, me: me(row) });
+}
+
+// Foto (persona) o logo (empresa): PNG, JPEG o WebP de hasta 1,5 MB, guardado en S3 privado y servido por /media.
+const IMAGE_TYPES = { png: "image/png", jpg: "image/jpeg", webp: "image/webp" };
+function imageType(buf) {
+  if (buf.length > 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "png";
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "jpg";
+  if (buf.length > 12 && buf.toString("latin1", 0, 4) === "RIFF" && buf.toString("latin1", 8, 12) === "WEBP") return "webp";
+  return null;
+}
+async function uploadAvatar(req, res, builder) {
+  if (!STORAGE) return json(res, 503, { error: "Photo uploads are not available right now." });
+  if (limited("avatar:" + builder.id, 10)) return json(res, 429, { error: "Too many uploads, please wait a minute." });
+  let buf;
+  try { buf = await readRawBody(req, 1_572_864); } catch { return json(res, 413, { error: "The image must be 1.5 MB or less." }); }
+  const ext = imageType(buf);
+  if (!ext) return json(res, 400, { error: "Use a PNG, JPG or WebP image." });
+  const key = `avatars/${builder.id}/${randomUUID()}.${ext}`;
+  try { await STORAGE.put(key, buf, { contentType: IMAGE_TYPES[ext] }); }
+  catch { return json(res, 502, { error: "Could not save the image. Please try again." }); }
+  setAvatar.run(key, Date.now(), builder.id);
+  scheduleBackup();
+  if (builder.avatar) STORAGE.remove(builder.avatar).catch(() => {});
+  const row = byId.get(builder.id);
+  broadcast({ type: "update", builder: publicView(row) });
+  json(res, 200, { ok: true, me: me(row) });
+}
+async function removeAvatar(res, builder) {
+  setAvatar.run(null, Date.now(), builder.id);
+  scheduleBackup();
+  if (builder.avatar) STORAGE?.remove(builder.avatar).catch(() => {});
+  const row = byId.get(builder.id);
+  broadcast({ type: "update", builder: publicView(row) });
+  json(res, 200, { ok: true, me: me(row) });
+}
+const MEDIA_RE = /^\/media\/(avatars\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(png|jpg|webp))$/;
+// Solo se sirven imágenes en uso: una foto reemplazada o quitada deja de verse aunque S3 no permita borrarla.
+const avatarInUse = db.prepare("SELECT 1 FROM builders WHERE avatar = ?");
+async function serveMedia(req, res, key, ext) {
+  if (!STORAGE || !avatarInUse.get(key)) return json(res, 404, { error: "not found" });
+  let obj;
+  try { obj = await STORAGE.get(key); }
+  catch (e) { return json(res, e.code === "NoSuchKey" || e.statusCode === 404 || e.statusCode === 403 ? 404 : 502, { error: "not found" }); }
+  // caché corta: al quitar una foto, Cloudflare deja de servirla en una hora como máximo
+  res.writeHead(200, { "content-type": IMAGE_TYPES[ext], "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff",
+    ...(obj.ContentLength ? { "content-length": obj.ContentLength } : {}) });
+  if (req.method === "HEAD") { obj.Body?.destroy?.(); return res.end(); }
+  obj.Body.on("error", () => res.destroy()).pipe(res);
+}
+
+const deleteBuilder = db.prepare("DELETE FROM builders WHERE id = ?");
+const deleteJobsOf = db.prepare("DELETE FROM jobs WHERE builder_id = ?");
+const deleteTokensOf = db.prepare("DELETE FROM member_tokens WHERE builder_id = ?");
+function removeProfile(res, builder) {
+  persistWithEmail(() => { deleteJobsOf.run(builder.id); deleteTokensOf.run(builder.id); deleteBuilder.run(builder.id); });
+  if (builder.avatar) STORAGE?.remove(builder.avatar).catch(() => {});
+  scheduleBackup();
+  broadcast({ type: "remove", id: builder.id, total: totalQ.get().n });
+  json(res, 200, { ok: true });
+}
+
+// ---------- empleos ----------
+const WORKPLACES = ["remote", "hybrid", "onsite"], JOB_TYPES = ["full-time", "part-time", "contract", "internship"];
+const insertJob = db.prepare(`INSERT INTO jobs (id,builder_id,title,company,country,city,workplace,type,salary,description,apply,created_at,expires_at)
+  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+const closeJob = db.prepare("UPDATE jobs SET closed_at = ? WHERE id = ? AND builder_id = ? AND closed_at IS NULL");
+const openJobsCount = db.prepare("SELECT COUNT(*) n FROM jobs WHERE builder_id = ? AND closed_at IS NULL AND expires_at > ?");
+const jobsQ = db.prepare(`SELECT j.*, b.name AS poster, b.kind AS poster_kind, b.avatar AS poster_avatar, b.company AS poster_company FROM jobs j JOIN builders b ON b.id = j.builder_id
+  WHERE j.closed_at IS NULL AND j.expires_at > :now
+    AND (:country = '' OR j.country = :country) AND (:workplace = '' OR j.workplace = :workplace) AND (:type = '' OR j.type = :type)
+    AND (:q = '' OR j.title LIKE :like OR j.company LIKE :like OR b.name LIKE :like OR j.description LIKE :like OR j.city LIKE :like)
+  ORDER BY j.created_at DESC LIMIT 60 OFFSET :offset`);
+const openJobsTotal = db.prepare("SELECT COUNT(*) n FROM jobs WHERE closed_at IS NULL AND expires_at > ?");
+function jobView(j, poster = { name: j.poster, kind: j.poster_kind, avatar: j.poster_avatar, company: j.poster_company }) {
+  return { id: j.id, title: j.title, company: j.company || (poster.kind === "company" ? poster.name : poster.company) || "", country: j.country || "", city: j.city || "",
+    workplace: j.workplace, type: j.type, salary: j.salary || "", description: j.description || "", apply: j.apply,
+    poster: { id: j.builder_id, name: poster.name, kind: poster.kind || "person", avatar: poster.avatar ? `/media/${poster.avatar}` : "" },
+    ts: j.created_at, expires: j.expires_at };
+}
+function parseJob(b) {
+  const title = clean(b.title, 80);
+  if (title.length < 3) return { error: "Add a job title." };
+  const workplace = WORKPLACES.includes(b.workplace) ? b.workplace : null;
+  if (!workplace) return { error: "Pick remote, hybrid or on-site." };
+  const type = JOB_TYPES.includes(b.type) ? b.type : null;
+  if (!type) return { error: "Pick the type of job." };
+  const country = clean(b.country, 2).toUpperCase();
+  if (country && !COUNTRIES.has(country)) return { error: "Pick a Latam country." };
+  if (!country && workplace !== "remote") return { error: "Pick the country for this job." };
+  let apply = clean(b.apply, 200);
+  if (EMAIL_RE.test(apply) && !/^https?:/i.test(apply)) apply = "mailto:" + apply.replace(/^mailto:/i, "");
+  else {
+    if (!/^https?:\/\//i.test(apply)) apply = "https://" + apply;
+    try { const u = new URL(apply); if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".")) throw 0; apply = u.href; }
+    catch { return { error: "Add a link or an email to apply." }; }
+  }
+  return { title, workplace, type, country, apply, company: clean(b.company, 80), city: clean(b.city, 60),
+    salary: clean(b.salary, 60), description: clean(String(b.description || "").replace(/\r?\n/g, " "), 600) };
+}
+async function postJob(req, res, builder) {
+  if (limited("job:" + builder.id, 10, HOUR)) return json(res, 429, { error: "Too many job posts, please wait a while." });
+  let b;
+  try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
+  const j = parseJob(b);
+  if (j.error) return json(res, 400, { error: j.error });
+  const now = Date.now();
+  if (openJobsCount.get(builder.id, now).n >= 10) return json(res, 400, { error: "You can have up to 10 open jobs. Close one first." });
+  const id = randomUUID();
+  insertJob.run(id, builder.id, j.title, j.company, j.country, j.city, j.workplace, j.type, j.salary, j.description, j.apply, now, now + 60 * DAY);
+  scheduleBackup();
+  const row = byId.get(builder.id);
+  broadcast({ type: "jobs", builder: publicView(row) });
+  json(res, 201, { ok: true, me: me(row) });
+}
+function endJob(res, builder, id) {
+  if (!closeJob.run(Date.now(), id, builder.id).changes) return json(res, 404, { error: "Job not found." });
+  scheduleBackup();
+  const row = byId.get(builder.id);
+  broadcast({ type: "jobs", builder: publicView(row) });
+  json(res, 200, { ok: true, me: me(row) });
 }
 
 async function merchPreorder(req, res) {
@@ -402,10 +616,38 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { entries: rows.map(publicView) });
     }
     if (pathname === "/api/register" && req.method === "POST") return await register(req, res);
+    if (pathname === "/api/jobs" && req.method === "GET") {
+      const u = new URL(req.url, "http://x").searchParams;
+      const q = clean(u.get("q") || "", 60), country = clean(u.get("country") || "", 2).toUpperCase();
+      const workplace = WORKPLACES.includes(u.get("workplace")) ? u.get("workplace") : "", type = JOB_TYPES.includes(u.get("type")) ? u.get("type") : "";
+      const rows = jobsQ.all({ q, like: `%${q}%`, country, workplace, type, now: Date.now(), offset: Math.max(0, Number(u.get("offset")) || 0) });
+      return json(res, 200, { jobs: rows.map(j => jobView(j)) });
+    }
+    if (pathname === "/api/signin/link" && req.method === "POST") return await requestLink(req, res);
+    if (pathname === "/api/signin" && req.method === "POST") return await startSession(req, res);
+    if (pathname === "/api/me" || pathname.startsWith("/api/me/")) {
+      const builder = sessionOf(req);
+      if (!builder) return json(res, 401, { error: "Please sign in again." });
+      if (pathname === "/api/me" && req.method === "GET") return json(res, 200, { ok: true, me: me(builder) });
+      if (pathname === "/api/me" && req.method === "POST") return await saveProfile(req, res, builder);
+      if (pathname === "/api/me" && req.method === "DELETE") return removeProfile(res, builder);
+      if (pathname === "/api/me/avatar" && req.method === "POST") return await uploadAvatar(req, res, builder);
+      if (pathname === "/api/me/avatar" && req.method === "DELETE") return removeAvatar(res, builder);
+      if (pathname === "/api/me/signout" && req.method === "POST") {
+        dropToken.run(tokenHash(String(req.headers.authorization).slice(7)));
+        return json(res, 200, { ok: true });
+      }
+      if (pathname === "/api/me/jobs" && req.method === "POST") return await postJob(req, res, builder);
+      const close = /^\/api\/me\/jobs\/([0-9a-f-]{36})\/close$/.exec(pathname);
+      if (close && req.method === "POST") return endJob(res, builder, close[1]);
+      return json(res, 404, { error: "not found" });
+    }
     if (pathname === "/api/merch/preorder" && req.method === "POST") return await merchPreorder(req, res);
     if (pathname === "/api/merch/status" && req.method === "GET") return await merchStatus(req, res);
     if (pathname === "/api/moonpay/webhook" && req.method === "POST") return await moonpayWebhook(req, res);
     if (pathname.startsWith("/api/")) return json(res, 404, { error: "not found" });
+    const media = MEDIA_RE.exec(pathname);
+    if (media && (req.method === "GET" || req.method === "HEAD")) return await serveMedia(req, res, media[1], media[2]);
     return await serveStatic(req, res);
   } catch (e) {
     console.error(e);

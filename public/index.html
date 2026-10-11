@@ -30,6 +30,8 @@
       <div class="nav-r">
         <span class="live mono"><i></i><b id="nav-online">1</b> live</span>
         <a class="hide-sm" href="#directory">Directory</a>
+        <a class="hide-sm" href="#jobs">Jobs</a>
+        <button class="navlink hide-sm" type="button" data-me="profile">Edit profile</button>
         <a class="pill" href="#join">Join the directory</a>
       </div>
     </div>
@@ -78,6 +80,7 @@
           <div><b>What you need</b><span>A name, an email and the country you build from. Everything else is optional.</span></div>
           <div><b>How it works</b><span>Free, about 30 seconds, no approval. Your light turns on instantly.</span></div>
           <div><b>Privacy</b><span>Your email stays private. Name, country, city, project and links are public.</span></div>
+          <div class="wide"><b>Edit anytime</b><span>Already in? Sign in with your email to edit your profile, add a photo or logo, switch it to a company, post jobs or remove it. <button class="linkish" type="button" data-me="profile">Edit your profile →</button></span></div>
         </div>
         <form id="form" class="form reveal" novalidate>
           <div class="seg" role="radiogroup" aria-label="Register as">
@@ -115,6 +118,7 @@
           <p>Your light is on for everyone. Now bring your people: share it.</p>
           <div class="cta">
             <a id="done-share" class="btn primary" target="_blank" rel="noopener">Share on 𝕏</a>
+            <button class="btn" type="button" data-me="profile">Edit profile</button>
             <button id="done-again" class="btn" type="button">Add someone else</button>
           </div>
         </div>
@@ -151,9 +155,32 @@
     </div>
   </section>
 
+  <section id="jobs" class="jobs">
+    <div class="wrap">
+      <p class="kicker mono reveal">03 — Jobs</p>
+      <div class="jobs-head reveal">
+        <h2>Build the golden era with us.</h2>
+        <button class="btn primary" type="button" data-me="jobs">Post a job</button>
+      </div>
+      <p class="lead reveal">Open roles at AI companies and builders in the directory. Posting is free for members; jobs stay up for 60 days.</p>
+      <div class="filters reveal">
+        <input id="jq" type="search" placeholder="Search roles, companies, cities…" aria-label="Search jobs" />
+        <select id="jcountry" aria-label="Country"><option value="">All countries</option></select>
+        <div class="seg small" role="radiogroup" aria-label="Workplace">
+          <label><input type="radio" name="jwork" value="" checked /> <span>All</span></label>
+          <label><input type="radio" name="jwork" value="remote" /> <span>Remote</span></label>
+          <label><input type="radio" name="jwork" value="hybrid" /> <span>Hybrid</span></label>
+          <label><input type="radio" name="jwork" value="onsite" /> <span>On-site</span></label>
+        </div>
+        <select id="jtype" aria-label="Job type"><option value="">Any type</option><option value="full-time">Full-time</option><option value="part-time">Part-time</option><option value="contract">Contract</option><option value="internship">Internship</option></select>
+      </div>
+      <ul id="jobs-list" class="jobs-list" aria-live="polite"></ul>
+    </div>
+  </section>
+
   <section id="merch" class="merch" hidden>
     <div class="wrap">
-      <p class="kicker mono reveal">03 — Merch</p>
+      <p class="kicker mono reveal">04 — Merch</p>
       <div class="merch-head reveal">
         <h2>Wear the golden era.</h2>
         <span class="soon mono">Pre-order</span>
@@ -227,6 +254,97 @@
       <span>Contact: Jack · <a href="https://x.com/cesarsuarezpab" target="_blank" rel="noopener">𝕏 @cesarsuarezpab</a></span>
     </div>
   </footer>
+
+  <dialog id="me" class="me" aria-labelledby="me-title">
+    <button class="cp-close" type="button" id="me-close" aria-label="Close">×</button>
+    <div id="me-signin">
+      <p class="kicker mono">Members</p>
+      <h3 id="me-title">Edit your profile</h3>
+      <p class="me-lead">Enter the email you joined with and we'll send you a sign-in link. No password needed.</p>
+      <form id="signin" class="form" novalidate>
+        <label>Email<input name="email" type="email" required maxlength="120" autocomplete="email" placeholder="ana@startup.ai" /></label>
+        <input name="hp_field" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
+        <div class="ts" data-form="signin"></div>
+        <button class="btn primary big" type="submit">Email me a sign-in link</button>
+        <p class="form-msg" role="status"></p>
+      </form>
+      <p class="fine">Not in the directory yet? <a href="#join" data-close>Join first</a>, it takes 30 seconds.</p>
+    </div>
+    <div id="me-main" hidden>
+      <div class="me-head">
+        <span class="avatar big" id="me-avatar"></span>
+        <div><p class="kicker mono" id="me-n">Member</p><h3 id="me-name"></h3><p class="fine" id="me-email"></p></div>
+      </div>
+      <div class="seg small me-tabs" role="tablist">
+        <label><input type="radio" name="metab" value="profile" checked /> <span>Profile</span></label>
+        <label><input type="radio" name="metab" value="jobs" /> <span>Jobs</span></label>
+      </div>
+      <div id="me-profile">
+        <div class="photo">
+          <span class="avatar" id="photo-preview"></span>
+          <div>
+            <b id="photo-label">Photo</b>
+            <span class="fine">PNG, JPG or WebP. Shown in the directory.</span>
+            <div class="photo-actions">
+              <label class="btn small">Upload<input type="file" id="photo-file" accept="image/png,image/jpeg,image/webp" hidden /></label>
+              <button class="btn small" type="button" id="photo-remove">Remove</button>
+            </div>
+          </div>
+        </div>
+        <form id="pform" class="form" novalidate>
+          <div class="seg" role="radiogroup" aria-label="Profile type">
+            <label><input type="radio" name="kind" value="person" /> <span>Person</span></label>
+            <label><input type="radio" name="kind" value="company" /> <span>Company</span></label>
+          </div>
+          <label><span class="name-label">Your name or username</span><input name="name" required maxlength="60" /></label>
+          <label class="person-only"><span>Company <span class="opt">(optional)</span></span><input name="company" maxlength="80" autocomplete="organization" /></label>
+          <div class="row">
+            <label>Country<select name="country" required></select></label>
+            <label>City<input name="city" maxlength="60" /></label>
+          </div>
+          <details class="also">
+            <summary>Also building from other countries? <span class="opt">(up to 4)</span></summary>
+            <div class="also-grid" role="group" aria-label="Other countries you build from"></div>
+          </details>
+          <label><span class="building-label">What are you building?</span><input name="building" maxlength="140" /></label>
+          <div class="row">
+            <label><span>Website <span class="opt">(optional)</span></span><input name="website" maxlength="120" inputmode="url" /></label>
+            <label><span>X handle <span class="opt">(optional)</span></span><input name="handle" maxlength="30" /></label>
+          </div>
+          <button class="btn primary big" type="submit">Save changes</button>
+          <p class="form-msg" role="status"></p>
+        </form>
+      </div>
+      <div id="me-jobs" hidden>
+        <ul id="my-jobs" class="my-jobs"></ul>
+        <form id="jform" class="form" novalidate>
+          <b class="form-title">Post a job</b>
+          <label>Job title<input name="title" required maxlength="80" placeholder="Senior ML Engineer" /></label>
+          <div class="row">
+            <label><span>Company <span class="opt">(defaults to yours)</span></span><input name="company" maxlength="80" /></label>
+            <label>Type<select name="type"><option value="full-time">Full-time</option><option value="part-time">Part-time</option><option value="contract">Contract</option><option value="internship">Internship</option></select></label>
+          </div>
+          <div class="row">
+            <label>Workplace<select name="workplace"><option value="remote">Remote</option><option value="hybrid">Hybrid</option><option value="onsite">On-site</option></select></label>
+            <label>Country<select name="country"><option value="">Anywhere in Latam (remote)</option></select></label>
+          </div>
+          <div class="row">
+            <label><span>City <span class="opt">(optional)</span></span><input name="city" maxlength="60" /></label>
+            <label><span>Salary range <span class="opt">(optional)</span></span><input name="salary" maxlength="60" placeholder="USD 4k–6k / month" /></label>
+          </div>
+          <label><span>Description <span class="opt">(optional · 600 characters)</span></span><textarea name="description" maxlength="600" rows="3" placeholder="What the role does and who you're looking for"></textarea></label>
+          <label>How to apply<input name="apply" required maxlength="200" placeholder="Link to the job post or jobs@startup.ai" /></label>
+          <p class="fine">Jobs are public with your profile name and close automatically after 60 days.</p>
+          <button class="btn primary big" type="submit">Publish job</button>
+          <p class="form-msg" role="status"></p>
+        </form>
+      </div>
+      <div class="me-foot">
+        <button class="linkish" type="button" id="me-signout">Sign out</button>
+        <button class="linkish danger" type="button" id="me-delete">Remove my profile</button>
+      </div>
+    </div>
+  </dialog>
 
   <div id="toast" class="toast" hidden></div>
   <script type="module" src="/app.js"></script>

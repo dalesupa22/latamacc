@@ -2,9 +2,16 @@
 
 Sitio de **Latam Accelerationism (Latam/acc)**, en inglés: directorio de empresas y personas de IA que construyen la golden era de la región. El mapa de Latam se enciende en dorado y cada registro se ilumina en vivo en el mapa de todos (WebSocket).
 
-- `server.mjs`: Node 24, sin framework. Estáticos de `public/`, `POST /api/register` (persona o empresa), `GET /api/state`, `GET /api/directory?q=&kind=&country=`, WebSocket en `/ws` (joins, personas en línea y chispas por clic). Guarda en SQLite (`data/latamacc.db`, fuera de Git). El directorio es público (el formulario lo avisa); el correo no se expone públicamente y se transmite a Brevo para confirmaciones transaccionales cuando está configurado. `DATA_DIR` permite usar otra carpeta de datos para pruebas.
+- `server.mjs`: Node 24, sin framework. Estáticos de `public/`, `POST /api/register` (persona o empresa), `GET /api/state`, `GET /api/directory?q=&kind=&country=`, `GET /api/jobs`, `/api/me*` (miembros, ver abajo), WebSocket en `/ws` (joins, personas en línea y chispas por clic). Guarda en SQLite (`data/latamacc.db`, fuera de Git). El directorio es público (el formulario lo avisa); el correo no se expone públicamente y se transmite a Brevo para confirmaciones transaccionales cuando está configurado. `DATA_DIR` permite usar otra carpeta de datos para pruebas.
 - `public/app.js`: canvas del mapa (oro, faros por registro, arcos, hover/clic), formulario y directorio con búsqueda y filtros.
 - `scripts/build-map.mjs`: genera `public/assets/latam.json` desde world-atlas (`npm i` y luego `node scripts/build-map.mjs countries-50m.json`).
+
+## Miembros: editar perfil, foto/logo y empleos
+
+- **Acceso sin contraseña.** "Edit profile" pide el correo del registro; `POST /api/signin/link` responde igual exista o no (no revela miembros) y, si existe, encola por Brevo un enlace `https://latamacc.si/#signin=TOKEN` (un solo uso, 24 h). `POST /api/signin` lo canjea por una sesión de 30 días que el navegador guarda en `localStorage` y envía como `Authorization: Bearer`. En `member_tokens` solo se guarda el SHA-256 de cada token; el payload del correo en `email_outbox` se vacía en cuanto se envía, falla o vence. Límite: 5 pedidos de enlace por IP cada 15 min, más los límites de Brevo (3 correos por destinatario al día). Sin Brevo configurado, el panel avisa que el acceso por correo abre pronto.
+- **Editar perfil** (`GET/POST /api/me`): mismos campos y validación que el registro, incluido pasar de persona a empresa (o al revés) y los países nómadas. `DELETE /api/me` elimina el perfil, sus empleos y sesiones. Los cambios se transmiten en vivo (`update`/`remove` por WebSocket).
+- **Foto o logo** (`POST/DELETE /api/me/avatar`): PNG, JPG o WebP de hasta 1,5 MB (el navegador la reduce a 512 px WebP antes de subirla), validada por su firma binaria y guardada en S3 como `avatars/<id-miembro>/<uuid>.<ext>`. Se sirve por `/media/avatars/...` solo mientras esté en uso en un perfil, así que una foto quitada deja de verse aunque el usuario IAM no tenga `s3:DeleteObject` (hoy no lo tiene: los objetos reemplazados quedan huérfanos en el bucket).
+- **Empleos** (`GET /api/jobs?q=&country=&workplace=&type=`, `POST /api/me/jobs`, `POST /api/me/jobs/:id/close`): los publica un miembro con sesión; título, remoto/híbrido/presencial, tipo, país (opcional si es remoto), ciudad, salario, descripción (600) y cómo aplicar (enlace o correo → `mailto:`). Máximo 10 abiertos por miembro, vencen a los 60 días. El directorio marca "Hiring · n" en los perfiles con empleos abiertos.
 
 ## Base de datos
 
