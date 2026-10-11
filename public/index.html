@@ -75,13 +75,13 @@
         <p class="kicker mono reveal">01 — Register below</p>
         <h2 class="reveal">Join the directory.</h2>
         <p class="lead reveal">Building with AI in Latin America? Add yourself or your company. Your light turns on live, on everyone's map.</p>
-        <div class="howto reveal">
-          <div><b>Who can join</b><span>Founders, engineers, researchers and creators building with AI in or from Latin America, and AI companies.</span></div>
-          <div><b>What you need</b><span>A name, an email and the country you build from. Everything else is optional.</span></div>
-          <div><b>How it works</b><span>Free, about 30 seconds, no approval. Your light turns on instantly.</span></div>
-          <div><b>Privacy</b><span>Your email stays private. Name, country, city, project and links are public.</span></div>
-          <div class="wide"><b>Edit anytime</b><span>Already in? Sign in with your email to edit your profile, add a photo or logo, switch it to a company, post jobs or remove it. <button class="linkish" type="button" data-me="profile">Edit your profile →</button></span></div>
-        </div>
+        <ul class="howto reveal" aria-label="How to join">
+          <li><i>✦</i><span><b>Who:</b> founders, engineers, researchers and creators building with AI in or from Latin America, and AI companies.</span></li>
+          <li><i>✦</i><span><b>You need:</b> a name, an email and the country you build from. Everything else is optional.</span></li>
+          <li><i>✦</i><span><b>Free, ~30 seconds, no approval.</b> Your light turns on instantly.</span></li>
+          <li><i>✦</i><span><b>Private email.</b> Name, country, city, project and links are public.</span></li>
+        </ul>
+        <p class="already reveal">Already in the directory? <button class="linkish" type="button" data-me="profile">Edit your profile</button>: add a photo or logo, switch to a company, post jobs.</p>
         <form id="form" class="form reveal" novalidate>
           <div class="seg" role="radiogroup" aria-label="Register as">
             <label><input type="radio" name="kind" value="person" checked /> <span>Person</span></label>
@@ -151,7 +151,9 @@
         </div>
       </div>
       <ul id="country-chips" class="chips reveal"></ul>
+      <p id="dir-count" class="dir-count mono" aria-live="polite"></p>
       <ul id="dir" class="dir"></ul>
+      <div class="dir-more"><button id="dir-more" class="btn" type="button" hidden>Show more</button></div>
     </div>
   </section>
 
@@ -247,6 +249,14 @@
       </div>
     </div>
   </section>
+
+  <div class="tabbar" role="navigation" aria-label="Sections">
+    <a href="#top" data-tab="top"><span>◎</span>Map</a>
+    <a href="#directory" data-tab="directory"><span>☰</span>Directory</a>
+    <a href="#join" data-tab="join" class="tab-join"><span>✦</span>Join</a>
+    <a href="#jobs" data-tab="jobs"><span>◆</span>Jobs</a>
+    <button type="button" data-me="profile"><span>◉</span>Profile</button>
+  </div>
 
   <footer class="foot">
     <div class="wrap">

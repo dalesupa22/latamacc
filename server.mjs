@@ -58,6 +58,10 @@ const directoryQ = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders
     AND (:kind = '' OR kind = :kind)
     AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like)
   ORDER BY created_at DESC LIMIT 60 OFFSET :offset`);
+const directoryCountQ = db.prepare(`SELECT COUNT(*) n FROM builders
+  WHERE (:country = '' OR country = :country OR EXISTS (SELECT 1 FROM json_each(builders.also) j WHERE j.value = :country))
+    AND (:kind = '' OR kind = :kind)
+    AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like)`);
 const byEmail = db.prepare(`SELECT rowid AS n, * FROM builders WHERE email = ?`);
 const byId = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders WHERE id = ?`);
 const recentQ = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders ORDER BY created_at DESC LIMIT 30`);
@@ -612,8 +616,9 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/directory" && req.method === "GET") {
       const u = new URL(req.url, "http://x").searchParams;
       const q = clean(u.get("q") || "", 60), country = clean(u.get("country") || "", 2).toUpperCase(), kind = clean(u.get("kind") || "", 10);
-      const rows = directoryQ.all({ q, like: `%${q}%`, country, kind: ["person", "company"].includes(kind) ? kind : "", offset: Math.max(0, Number(u.get("offset")) || 0) });
-      return json(res, 200, { entries: rows.map(publicView) });
+      const f = { q, like: `%${q}%`, country, kind: ["person", "company"].includes(kind) ? kind : "" };
+      const rows = directoryQ.all({ ...f, offset: Math.max(0, Number(u.get("offset")) || 0) });
+      return json(res, 200, { entries: rows.map(publicView), count: directoryCountQ.get(f).n });
     }
     if (pathname === "/api/register" && req.method === "POST") return await register(req, res);
     if (pathname === "/api/jobs" && req.method === "GET") {

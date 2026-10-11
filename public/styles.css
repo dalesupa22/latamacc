@@ -110,10 +110,11 @@ h2 { font-size: clamp(30px, 4.6vw, 54px); line-height: 1.04; letter-spacing: -.0
 .growth-sum span { color: #d9d2c5; }
 .g-chart { display: block; width: 100%; height: 90px; margin-top: 8px; overflow: visible; }
 .g-axis { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; color: var(--mute); margin-top: 4px; }
-.howto { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 640px; }
-.howto div { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--card); display: grid; gap: 4px; }
-.howto b { font-size: 13px; color: var(--fire2); }
-.howto span { font-size: 13px; color: #cfc9c1; line-height: 1.45; }
+.howto { margin-top: 22px; list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 22px; max-width: 660px; }
+.howto li { display: flex; gap: 10px; font-size: 14px; color: #cfc9c1; line-height: 1.45; }
+.howto i { color: var(--fire2); font-style: normal; flex: none; }
+.howto b { color: var(--fg); font-weight: 600; }
+.already { margin-top: 16px; font-size: 14px; color: var(--mute); padding: 10px 14px; border: 1px dashed rgba(240,200,110,.35); border-radius: 12px; max-width: 660px; }
 .also { border: 1px solid #332e29; border-radius: 10px; padding: 10px 12px; font-size: 13px; color: var(--mute); }
 .also summary { cursor: pointer; }
 .also[open] summary { margin-bottom: 10px; }
@@ -254,8 +255,14 @@ h2 { font-size: clamp(30px, 4.6vw, 54px); line-height: 1.04; letter-spacing: -.0
 .card b { font-size: 17px; letter-spacing: -.01em; }
 .card .co { color: var(--mute); font-size: 13px; }
 .card p { color: #cfc9c1; font-size: 14px; }
-.card-foot { margin-top: auto; padding-top: 10px; display: flex; justify-content: space-between; gap: 8px; color: var(--mute); font-size: 12px; }
-.card-foot .links { display: flex; gap: 10px; }
+.card-foot { margin-top: auto; padding-top: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--mute); font-size: 12px; }
+.card-foot > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-foot .links { display: flex; gap: 10px; flex: none; max-width: 60%; }
+.card-foot .links a { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card { cursor: pointer; }
+.card:focus-visible { outline: 2px solid var(--fire2); outline-offset: 3px; }
+.dir-count { margin-top: 18px; font-size: 12px; color: var(--mute); }
+.dir-more { display: flex; justify-content: center; margin-top: 24px; }
 .card-foot a { color: var(--fire2); text-decoration: none; }
 .foot a { color: var(--fire2); text-decoration: none; }
 
@@ -316,7 +323,6 @@ h2 { font-size: clamp(30px, 4.6vw, 54px); line-height: 1.04; letter-spacing: -.0
 .navlink:hover { color: var(--fg); }
 .linkish { color: var(--fire2); text-decoration: underline; text-underline-offset: 3px; }
 .linkish.danger { color: #ff8f80; }
-.howto .wide { grid-column: 1 / -1; }
 .btn.small { padding: 7px 14px; font-size: 13px; }
 .avatar { flex: none; width: 34px; height: 34px; border-radius: 50%; display: inline-grid; place-items: center; overflow: hidden;
   background: linear-gradient(135deg, #3a2c10, #1a1307); border: 1px solid rgba(240,200,110,.4); color: var(--fire2); font-weight: 700; font-size: 14px; }
@@ -367,3 +373,27 @@ button.badge { background: none; font: inherit; font-size: 11px; cursor: pointer
 .my-jobs:empty { display: none; }
 .me-foot { display: flex; justify-content: space-between; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 13px; }
 @media (max-width: 600px) { .me { padding: 22px 16px; } .jobs-list { grid-template-columns: 1fr; } .howto { grid-template-columns: 1fr; } }
+
+.jobs-empty { grid-column: 1 / -1; list-style: none; border: 1px solid rgba(240,200,110,.35); border-radius: 18px; padding: 28px;
+  background: linear-gradient(120deg, rgba(240,200,110,.09), transparent 60%); display: grid; gap: 14px; justify-items: start; }
+.jobs-empty b { font-size: 22px; letter-spacing: -.02em; }
+.jobs-empty ul { list-style: none; display: grid; gap: 6px; color: #cfc9c1; font-size: 15px; }
+/* barra inferior en móvil */
+.tabbar { display: none; }
+@media (max-width: 700px) {
+  .tabbar { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
+    background: rgba(8,7,5,.92); backdrop-filter: blur(12px); border-top: 1px solid var(--line); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); }
+  .tabbar a, .tabbar button { all: unset; display: grid; justify-items: center; gap: 2px; font-size: 11px; color: var(--mute); cursor: pointer; padding: 4px 0; }
+  .tabbar span { font-size: 17px; line-height: 1; }
+  .tabbar .on { color: var(--fire2); }
+  .tabbar .tab-join span { color: #1a1204; background: linear-gradient(135deg, #fff1c2, #e9c063 45%, #b8862b); width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 15px; }
+  body { padding-bottom: 64px; }
+  .toast { bottom: 84px; }
+  .chips { flex-wrap: nowrap; overflow-x: auto; margin-left: -20px; margin-right: -20px; padding: 0 20px 6px; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chips li { flex: none; }
+  .howto { grid-template-columns: 1fr; }
+  .cpanel { bottom: 64px; }
+  .hero-copy { bottom: 88px; }
+  .hero { min-height: 700px; }
+}

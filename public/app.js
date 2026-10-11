@@ -289,14 +289,15 @@ function frame() {
     ctx.drawImage(spr, q.x - sz, q.y - sz, sz * 2, sz * 2);
   }
 
-  // builders
+  // builders: con muchos miembros las luces se achican para que el mapa no se sature de blanco
+  const dens = Math.max(0.42, Math.min(1, Math.sqrt(70 / Math.max(70, S.points.length))));
   ctx.strokeStyle = "#fff6e0";
   S.points.forEach((pt, i) => {
     const age = now - pt.born;
     if (age < 0) return;
     const intro = Math.min(1, age / 0.6);
     const pulse = 0.75 + Math.sin(now * 2.4 + pt.phase) * 0.25;
-    const r = (20 + 10 * pulse) * intro * (age < 1.2 ? 1 + (1.2 - age) * 3 : 1) / shrink;
+    const r = (20 + 10 * pulse) * intro * (age < 1.2 ? 1 + (1.2 - age) * 3 : dens) / shrink;
     ctx.globalAlpha = 1;
     ctx.drawImage(BEACON, pt.x - r, pt.y - r, r * 2, r * 2);
     if (pt === mouse.point || pt.id === hoverId) {
@@ -308,7 +309,7 @@ function frame() {
       const a = ((now + pt.phase) % 3) / 3;
       ctx.globalAlpha = (1 - a) * 0.7;
       ctx.lineWidth = 1.5 / k;
-      ctx.beginPath(); ctx.arc(pt.x, pt.y, (8 + a * 46) / shrink, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, (8 + a * 46) * dens / shrink, 0, Math.PI * 2); ctx.stroke();
     }
   });
 
@@ -512,7 +513,7 @@ function onJoin(b, total) {
   ticker(b);
   renderStats(); renderFeed(true); renderBoard(); renderGrowth(); renderChips();
   if (countriesOf(b).includes(panelCC)) openCountry(panelCC);
-  if (matchesFilter(b)) { dir.entries.unshift(b); renderDir(); }
+  if (matchesFilter(b)) { dir.entries.unshift(b); dir.count++; renderDir(); }
 }
 
 // un perfil editado o eliminado: se recargan conteos y luces sin reiniciar el mapa
@@ -609,7 +610,7 @@ function ticker(b) {
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(t._h); t._h = setTimeout(() => (t.hidden = true), 4500); }
 
 // ---------- directorio ----------
-const dir = { entries: [], q: "", kind: "", country: "" };
+const dir = { entries: [], q: "", kind: "", country: "", count: 0, seq: 0, loading: false };
 const matchesFilter = b => (!dir.kind || b.kind === dir.kind) && (!dir.country || countriesOf(b).includes(dir.country)) &&
   (!dir.q || [b.name, b.company, b.building, b.city].join(" ").toLowerCase().includes(dir.q.toLowerCase()));
 
@@ -620,13 +621,18 @@ function renderChips() {
 }
 function renderDir() {
   const ul = $("#dir");
+  const where = dir.country ? ` in ${flag(dir.country)} ${cname(dir.country)}` : "";
+  const what = (dir.count === 1 ? { company: "company", person: "person", "": "member" } : { company: "companies", person: "people", "": "members" })[dir.kind];
+  $("#dir-count").textContent = dir.count ? `${dir.count.toLocaleString("en")} ${what}${where}${dir.q ? ` matching “${dir.q}”` : ""} · click a card to see it on the map` : "";
+  $("#dir-more").hidden = dir.entries.length >= dir.count;
+  $("#dir-more").textContent = `Show more (${(dir.count - dir.entries.length).toLocaleString("en")} more)`;
   if (!dir.entries.length) {
     ul.innerHTML = `<li class="empty">${dir.q || dir.kind || dir.country ? "No matches yet." : "The directory is waiting for its first members."} <a href="#join">Join the directory</a></li>`;
     return;
   }
   ul.innerHTML = dir.entries.map(b => {
     const site = safeUrl(b.website);
-    return `<li class="card">
+    return `<li class="card" data-id="${esc(b.id)}" data-cc="${esc(b.country)}" tabindex="0" title="See ${esc(b.name)} on the map">
       <div class="card-top">${avatar(b)}<span class="flag">${flag(b.country)}</span><span class="badge ${b.kind}">${b.kind === "company" ? "Company" : "Person"}</span>${b.hiring ? `<button class="badge hiring" type="button" data-hiring="${esc(b.name)}">Hiring · ${b.hiring}</button>` : ""}<small class="mono">#${b.n}</small></div>
       <b>${esc(b.name)}</b>${b.kind === "person" && b.company ? `<span class="co">${esc(b.company)}</span>` : ""}
       ${b.building ? `<p>${esc(b.building)}</p>` : ""}
@@ -637,11 +643,30 @@ function renderDir() {
   }).join("");
 }
 let dirTimer;
-async function loadDir() {
-  const qs = new URLSearchParams({ q: dir.q, kind: dir.kind, country: dir.country });
-  try { dir.entries = (await fetch("/api/directory?" + qs).then(r => r.json())).entries || []; } catch { dir.entries = []; }
+// primera página o siguiente (append); seq descarta respuestas viejas si cambian los filtros
+async function loadDir(more = false) {
+  if (more && (dir.loading || dir.entries.length >= dir.count)) return;
+  const seq = more ? dir.seq : ++dir.seq;
+  dir.loading = true;
+  const qs = new URLSearchParams({ q: dir.q, kind: dir.kind, country: dir.country, offset: more ? dir.entries.length : 0 });
+  let j = { entries: [], count: 0 };
+  try { j = await fetch("/api/directory?" + qs).then(r => r.json()); } catch {}
+  dir.loading = false;
+  if (seq !== dir.seq) return;
+  const seen = new Set(more ? dir.entries.map(e => e.id) : []);
+  dir.entries = more ? dir.entries.concat((j.entries || []).filter(e => !seen.has(e.id))) : j.entries || [];
+  dir.count = j.count ?? dir.entries.length;
   renderDir();
 }
+$("#dir-more").addEventListener("click", () => loadDir(true));
+// tocar una tarjeta lleva al mapa con esa persona o empresa resaltada
+function showOnMap(id, cc) {
+  $(".hero").scrollIntoView({ behavior: reduced ? "auto" : "smooth" });
+  openCountry(cc, id);
+  const p = S.points.find(q => q.id === id && q.country === cc);
+  if (p) setTimeout(() => { flare(p.x, p.y, `${flag(cc)} ${p.name}`, false); hoverId = id; }, 500);
+}
+$("#dir").addEventListener("keydown", e => { const li = e.target.closest?.(".card"); if (li && e.key === "Enter") showOnMap(li.dataset.id, li.dataset.cc); });
 function filterCountry(cc) {
   dir.country = cc; renderChips(); loadDir();
   if (cc) document.getElementById("directory").scrollIntoView({ behavior: "smooth" });
@@ -650,6 +675,8 @@ $("#q").addEventListener("input", e => { dir.q = e.target.value.trim(); clearTim
 document.querySelectorAll('input[name="fkind"]').forEach(r => r.addEventListener("change", e => { dir.kind = e.target.value; loadDir(); }));
 $("#dir").addEventListener("click", e => {
   const name = e.target.closest("[data-hiring]")?.dataset.hiring;
+  const card = e.target.closest(".card");
+  if (!name && card && !e.target.closest("a")) return showOnMap(card.dataset.id, card.dataset.cc);
   if (!name) return;
   jobs.q = name; $("#jq").value = name; loadJobs();
   document.getElementById("jobs").scrollIntoView({ behavior: "smooth" });
@@ -750,7 +777,10 @@ async function loadJobs() {
   try { jobs.list = (await fetch("/api/jobs?" + qs).then(r => r.json())).jobs || []; } catch { jobs.list = []; }
   const filtered = jobs.q || jobs.country || jobs.workplace || jobs.type;
   $("#jobs-list").innerHTML = jobs.list.length ? jobs.list.map(j => jobCard(j)).join("")
-    : `<li class="empty">${filtered ? "No open roles match these filters." : "No open roles yet. Members can post jobs for free."} <button class="linkish" type="button" data-me="jobs">Post a job →</button></li>`;
+    : filtered ? `<li class="empty">No open roles match these filters. <button class="linkish" type="button" data-me="jobs">Post one →</button></li>`
+    : `<li class="jobs-empty"><b>Be the first company hiring on Latam/acc.</b>
+        <ul><li>✦ Reach ${S.total.toLocaleString("en")} AI builders across ${Object.values(S.byCountry).filter(n => n > 0).length} countries</li><li>✦ Free for members, live in seconds</li><li>✦ Remote, hybrid or on-site, with your own apply link</li></ul>
+        <button class="btn primary" type="button" data-me="jobs">Post a job</button></li>`;
 }
 let jobsTimer;
 $("#jq").addEventListener("input", e => { jobs.q = e.target.value.trim(); clearTimeout(jobsTimer); jobsTimer = setTimeout(loadJobs, 200); });
@@ -1070,6 +1100,12 @@ const io = new IntersectionObserver(es => es.forEach(e => {
 document.querySelectorAll(".reveal").forEach(el => io.observe(el));
 new IntersectionObserver(([e]) => { heroVisible = e.isIntersecting; }).observe($(".hero"));
 
+// barra inferior en móvil: marca la sección visible
+const tabs = [...document.querySelectorAll(".tabbar [data-tab]")];
+const tabIO = new IntersectionObserver(es => es.forEach(e => {
+  if (e.isIntersecting) tabs.forEach(t => t.classList.toggle("on", t.dataset.tab === e.target.id));
+}), { rootMargin: "-45% 0px -50% 0px" });
+["top", "join", "directory", "jobs"].forEach(id => tabIO.observe(document.getElementById(id)));
 const clock = () => { $("#clock").textContent = new Date().toLocaleTimeString("en-GB", { timeZone: "America/Bogota", hour12: false }) + " BOG"; };
 clock(); setInterval(clock, 1000);
 setInterval(() => renderFeed(false), 60_000);
