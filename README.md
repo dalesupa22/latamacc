@@ -49,6 +49,21 @@ Antes de entregar la URL al comprador, el servidor consulta el charge recién cr
 
 Pruebas aisladas: `node --test tests/*.test.mjs`. No usan claves reales, red del proveedor ni la base activa. Documentación oficial: [inicio API](https://docs.hel.io/reference/getting-started), [charges](https://docs.hel.io/reference/charge/create), [consulta de charge](https://docs.hel.io/reference/charge/retrieve), [firmas de webhook](https://docs.hel.io/docs/webhooks).
 
+## Escrow de bounties (payment rails)
+
+Quien publica un bounty puede poner un monto en USD y depositarlo con MoonPay: paga recompensa + comisión de
+LATAMACC (10 %, mínimo USD 5; montos entre USD 25 y 25.000) al mismo paylink de la tienda, en USDC sobre Solana a la
+wallet de LATAMACC. MoonPay Commerce ya no permite pagos divididos en paylinks nuevos, por eso la comisión se cobra en
+el depósito y LATAMACC custodia la recompensa. El bounty aparece como "Funded · in escrow"; el autor elige ganador
+(nombre + wallet de Solana) o lo cierra y pide reembolso de la recompensa (la comisión no se devuelve).
+
+- Apagado por defecto: se enciende con `Environment=BOUNTY_ESCROW=1` en `latamacc-web` y reinicio. Custodiar dinero de
+  terceros es una decisión de negocio/legal; no lo actives sin aprobación.
+- Solo la consulta a MoonPay confirma un depósito (igual que la tienda); el webhook firmado solo la dispara.
+- Los pagos salientes los hace una persona desde la wallet; el servidor no tiene llaves. Cola y registro:
+  `node scripts/bounty-payouts.mjs` (lista), `... paid <id> <firma>` y `... refunded <id> <firma>`.
+- Un miembro con dinero en escrow sin liquidar no puede borrar su perfil. Reglas en `lib/payrails.mjs`.
+
 ## Archivos en Amazon S3
 
 El backend dispone de `S3Storage` en `lib/storage.mjs` para guardar y leer objetos del bucket privado `latamacc` en `us-east-1`. Las credenciales viven en `~/.config/latamacc/s3.json`, fuera de Git, con permisos **600** (carpeta 700):

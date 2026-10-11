@@ -189,7 +189,7 @@
         <h2>Get paid to accelerate Latam.</h2>
         <button class="btn primary" type="button" data-me="bounties">Post a bounty</button>
       </div>
-      <p class="lead reveal">Rewards from members for sales intros, product work and content. Pick one, deliver, and get paid by the member who posted it. Posting is free.</p>
+      <p class="lead reveal" id="bounties-lead">Rewards from members for sales intros, product work and content. Pick one, deliver, and get paid by the member who posted it. Posting is free.</p>
       <div class="filters reveal">
         <input id="bq" type="search" placeholder="Search bounties, rewards, members…" aria-label="Search bounties" />
         <div class="seg small" role="radiogroup" aria-label="Category">
@@ -375,19 +375,21 @@
       </div>
       <div id="me-bounties" hidden>
         <ul id="my-bounties" class="my-jobs"></ul>
+        <ul id="my-escrow" class="my-jobs"></ul>
         <form id="bform" class="form" novalidate>
           <b class="form-title">Post a bounty</b>
           <label>What do you need?<input name="title" required maxlength="90" placeholder="Intro to the CTO of a bank in Mexico" /></label>
           <div class="row">
             <label>Category<select name="category"><option value="intro">Sales intro</option><option value="product">Product</option><option value="content">Content</option><option value="other">Other</option></select></label>
-            <label>Reward<input name="reward" required maxlength="60" placeholder="USD 500 or 10% of the first deal" /></label>
+            <label>Reward<input name="reward" maxlength="60" placeholder="USD 500 or 10% of the first deal" /></label>
           </div>
+          <label class="escrow-field" hidden><span>Escrow amount in USD <span class="opt">(optional · deposit it with MoonPay so builders know you'll pay)</span></span><input name="reward_usd" inputmode="numeric" maxlength="7" placeholder="500" /></label>
           <label><span>Details <span class="opt">(optional · 800 characters)</span></span><textarea name="description" maxlength="800" rows="3" placeholder="What counts as delivered, who you want to meet, format, examples…"></textarea></label>
           <div class="row">
             <label>Where to submit<input name="submit" required maxlength="200" placeholder="Link to a form or you@startup.ai" /></label>
             <label><span>Deadline <span class="opt">(default 30 days)</span></span><input name="deadline" type="date" /></label>
           </div>
-          <p class="fine">Bounties are public with your profile name. You pay the reward directly to whoever delivers.</p>
+          <p class="fine" id="bounty-terms">Bounties are public with your profile name. You pay the reward directly to whoever delivers.</p>
           <button class="btn primary big" type="submit">Publish bounty</button>
           <p class="form-msg" role="status"></p>
         </form>

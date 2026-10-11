@@ -9,6 +9,7 @@ import { WebSocketServer } from "ws";
 import { loadMoonpayConfig, MoonpayCommerce, USD_ID, validateCharge, verifyWebhook } from "./lib/moonpay.mjs";
 import { loadStorageConfig, S3Storage } from "./lib/storage.mjs";
 import { loadBrevoConfig, BrevoMailer, EmailOutbox } from "./lib/email.mjs";
+import { bountyQuote, parseRewardUsd, usdToMinor, solanaAddressOk, FEE_BPS, MIN_FEE_USD, MIN_REWARD_USD, MAX_REWARD_USD } from "./lib/payrails.mjs";
 
 const ROOT = new URL(".", import.meta.url).pathname;
 const PUBLIC = join(ROOT, "public");
@@ -53,6 +54,20 @@ db.exec(`CREATE TABLE IF NOT EXISTS bounties (
   description TEXT, submit TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, closed_at INTEGER);
   CREATE INDEX IF NOT EXISTS bounties_builder ON bounties(builder_id);
   CREATE INDEX IF NOT EXISTS bounties_open ON bounties(closed_at, expires_at);`);
+// reward_usd: recompensa en USD enteros cuando el bounty se puede depositar en escrow (lib/payrails.mjs).
+if (!db.prepare("PRAGMA table_info(bounties)").all().some(c => c.name === "reward_usd")) db.exec("ALTER TABLE bounties ADD COLUMN reward_usd INTEGER");
+// Depósitos en escrow de bounties: recompensa + comisión cobradas con MoonPay a la wallet de LATAMACC.
+// Las filas no se borran (son el libro de lo que LATAMACC custodia y paga); title guarda el título al depositar.
+db.exec(`CREATE TABLE IF NOT EXISTS bounty_funds (
+  id TEXT PRIMARY KEY, bounty_id TEXT NOT NULL, builder_id TEXT NOT NULL, title TEXT NOT NULL,
+  reward_usd INTEGER NOT NULL, fee_usd INTEGER NOT NULL, total_usd INTEGER NOT NULL,
+  payment_amount TEXT NOT NULL, payment_currency TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL,
+  charge_token TEXT UNIQUE, charge_id TEXT, checkout_url TEXT, expires_at INTEGER,
+  payment_tx_id TEXT UNIQUE, payment_signature TEXT, paid_at INTEGER,
+  winner_name TEXT, winner_wallet TEXT, awarded_at INTEGER, settle_signature TEXT, settled_at INTEGER, note TEXT);
+  CREATE INDEX IF NOT EXISTS bounty_funds_bounty ON bounty_funds(bounty_id, created_at);
+  CREATE INDEX IF NOT EXISTS bounty_funds_builder ON bounty_funds(builder_id, created_at);
+  CREATE UNIQUE INDEX IF NOT EXISTS bounty_funds_one_checkout ON bounty_funds(bounty_id) WHERE status = 'awaiting_payment';`);
 // Acceso de miembros sin contraseña: enlace por correo (un uso, 24 h) que se canjea por una sesión (30 días).
 // Solo se guarda el hash SHA-256 de cada token.
 db.exec(`CREATE TABLE IF NOT EXISTS member_tokens (
@@ -213,6 +228,7 @@ function state() {
     kinds: Object.fromEntries(kindsQ.all().map(r => [r.kind || "person", r.n])),
     ...presence(),
     merchPayments: merchPayments(),
+    bountyPayments: bountyPayments(),
   };
 }
 
@@ -317,9 +333,14 @@ function sessionOf(req) {
   return t ? byId.get(t.builder_id) || null : null;
 }
 const myJobsQ = db.prepare("SELECT * FROM jobs WHERE builder_id = ? AND closed_at IS NULL AND expires_at > ? ORDER BY created_at DESC");
-const myBountiesQ = db.prepare("SELECT * FROM bounties WHERE builder_id = ? AND closed_at IS NULL AND expires_at > ? ORDER BY created_at DESC");
+const myBountiesQ = db.prepare(`SELECT x.*, (SELECT COUNT(*) FROM bounty_funds f WHERE f.bounty_id = x.id AND f.status = 'paid') AS escrow
+  FROM bounties x WHERE builder_id = :id AND closed_at IS NULL
+    AND (expires_at > :now OR EXISTS (SELECT 1 FROM bounty_funds f WHERE f.bounty_id = x.id AND f.status = 'paid'))
+  ORDER BY created_at DESC`);
 const me = r => ({ ...publicView(r), email: r.email, jobs: myJobsQ.all(r.id, Date.now()).map(j => jobView(j, r)),
-  bounties: myBountiesQ.all(r.id, Date.now()).map(x => bountyView(x, r)) });
+  // un bounty con depósito vencido sigue visible para su autor hasta elegir ganador o cerrarlo (reembolso)
+  bounties: myBountiesQ.all({ id: r.id, now: Date.now() }).map(x => ({ ...bountyView(x, r), funding: fundingView(latestFund.get(x.id)) })),
+  escrow: myFundsQ.all(r.id).map(fundingView) });
 
 async function requestLink(req, res) {
   const ip = clientIp(req);
@@ -423,6 +444,8 @@ const deleteBuilder = db.prepare("DELETE FROM builders WHERE id = ?");
 const deleteJobsOf = db.prepare("DELETE FROM jobs WHERE builder_id = ?");
 const deleteTokensOf = db.prepare("DELETE FROM member_tokens WHERE builder_id = ?");
 function removeProfile(res, builder) {
+  if (openEscrowOf.get(builder.id))
+    return json(res, 409, { error: "You have bounty money in escrow. Pick a winner or close the bounty and wait for the refund before removing your profile." });
   persistWithEmail(() => { deleteJobsOf.run(builder.id); deleteBountiesOf.run(builder.id); deleteTokensOf.run(builder.id); deleteBuilder.run(builder.id); });
   if (builder.avatar) STORAGE?.remove(builder.avatar).catch(() => {});
   scheduleBackup();
@@ -433,16 +456,18 @@ function removeProfile(res, builder) {
 // ---------- bounties ----------
 const BOUNTY_CATEGORIES = ["intro", "product", "content", "other"];
 const deleteBountiesOf = db.prepare("DELETE FROM bounties WHERE builder_id = ?");
-const insertBounty = db.prepare(`INSERT INTO bounties (id,builder_id,title,category,reward,description,submit,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?)`);
+const insertBounty = db.prepare(`INSERT INTO bounties (id,builder_id,title,category,reward,reward_usd,description,submit,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?)`);
 const closeBounty = db.prepare("UPDATE bounties SET closed_at = ? WHERE id = ? AND builder_id = ? AND closed_at IS NULL");
 const openBountiesCount = db.prepare("SELECT COUNT(*) n FROM bounties WHERE builder_id = ? AND closed_at IS NULL AND expires_at > ?");
-const bountiesQ = db.prepare(`SELECT x.*, b.name AS poster, b.kind AS poster_kind, b.avatar AS poster_avatar FROM bounties x JOIN builders b ON b.id = x.builder_id
+const ESCROW = `(SELECT COUNT(*) FROM bounty_funds f WHERE f.bounty_id = x.id AND f.status = 'paid') AS escrow`;
+const bountiesQ = db.prepare(`SELECT x.*, ${ESCROW}, b.name AS poster, b.kind AS poster_kind, b.avatar AS poster_avatar FROM bounties x JOIN builders b ON b.id = x.builder_id
   WHERE x.closed_at IS NULL AND x.expires_at > :now AND (:category = '' OR x.category = :category)
     AND (:q = '' OR x.title LIKE :like OR x.description LIKE :like OR x.reward LIKE :like OR b.name LIKE :like)
   ORDER BY x.expires_at ASC LIMIT 60 OFFSET :offset`);
 const openBountiesTotal = db.prepare("SELECT COUNT(*) n FROM bounties WHERE closed_at IS NULL AND expires_at > ?");
 function bountyView(x, poster = { name: x.poster, kind: x.poster_kind, avatar: x.poster_avatar }) {
-  return { id: x.id, title: x.title, category: x.category, reward: x.reward, description: x.description || "", submit: x.submit,
+  return { id: x.id, title: x.title, category: x.category, reward: x.reward, rewardUsd: x.reward_usd || null, funded: x.escrow > 0,
+    description: x.description || "", submit: x.submit,
     poster: { id: x.builder_id, name: poster.name, kind: poster.kind || "person", avatar: poster.avatar ? `/media/${poster.avatar}` : "" },
     ts: x.created_at, deadline: x.expires_at };
 }
@@ -458,7 +483,11 @@ function parseBounty(b, now) {
   if (title.length < 3) return { error: "Add a title for the bounty." };
   const category = BOUNTY_CATEGORIES.includes(b.category) ? b.category : null;
   if (!category) return { error: "Pick a category." };
-  const reward = clean(b.reward, 60);
+  // reward_usd (opcional): monto en USD enteros que se puede depositar en escrow con MoonPay
+  const rewardUsd = parseRewardUsd(b.reward_usd);
+  if (rewardUsd !== null && !(rewardUsd >= MIN_REWARD_USD && rewardUsd <= MAX_REWARD_USD))
+    return { error: `Escrow rewards are whole USD between ${MIN_REWARD_USD} and ${MAX_REWARD_USD.toLocaleString("en-US")}.` };
+  const reward = clean(b.reward, 60) || (rewardUsd ? `USD ${rewardUsd.toLocaleString("en-US")}` : "");
   if (reward.length < 2) return { error: "Add the reward, for example USD 500 or 10% of the first deal." };
   const submit = contactLink(b.submit);
   if (!submit) return { error: "Add a link or an email where people submit." };
@@ -469,7 +498,7 @@ function parseBounty(b, now) {
     if (!Number.isFinite(t) || t < now + HOUR || t > now + 180 * DAY) return { error: "Pick a deadline within the next 6 months." };
     expires = t;
   }
-  return { title, category, reward, submit, expires, description: clean(String(b.description || "").replace(/\r?\n/g, " "), 800) };
+  return { title, category, reward, rewardUsd, submit, expires, description: clean(String(b.description || "").replace(/\r?\n/g, " "), 800) };
 }
 async function postBounty(req, res, builder) {
   if (limited("bounty:" + builder.id, 10, HOUR)) return json(res, 429, { error: "Too many bounties, please wait a while." });
@@ -478,14 +507,128 @@ async function postBounty(req, res, builder) {
   const now = Date.now(), x = parseBounty(b, now);
   if (x.error) return json(res, 400, { error: x.error });
   if (openBountiesCount.get(builder.id, now).n >= 10) return json(res, 400, { error: "You can have up to 10 open bounties. Close one first." });
-  insertBounty.run(randomUUID(), builder.id, x.title, x.category, x.reward, x.description, x.submit, now, x.expires);
+  insertBounty.run(randomUUID(), builder.id, x.title, x.category, x.reward, x.rewardUsd, x.description, x.submit, now, x.expires);
   scheduleBackup();
   const row = byId.get(builder.id);
   broadcast({ type: "bounties" });
   json(res, 201, { ok: true, me: me(row) });
 }
 function endBounty(res, builder, id) {
-  if (!closeBounty.run(Date.now(), id, builder.id).changes) return json(res, 404, { error: "Bounty not found." });
+  // cerrar un bounty con depósito sin ganador pide el reembolso (lo paga LATAMACC; ver scripts/bounty-payouts.mjs)
+  const closed = persistWithEmail(() => {
+    if (!closeBounty.run(Date.now(), id, builder.id).changes) return false;
+    requestRefund.run(id);
+    return true;
+  });
+  if (!closed) return json(res, 404, { error: "Bounty not found." });
+  scheduleBackup();
+  broadcast({ type: "bounties" });
+  json(res, 200, { ok: true, me: me(byId.get(builder.id)) });
+}
+
+// ---------- escrow de bounties (payment rails) ----------
+const insertFund = db.prepare(`INSERT INTO bounty_funds (id,bounty_id,builder_id,title,reward_usd,fee_usd,total_usd,payment_amount,payment_currency,status,created_at)
+  VALUES (?,?,?,?,?,?,?,?,?,'awaiting_payment',?)`);
+const attachFund = db.prepare("UPDATE bounty_funds SET charge_token = ?, charge_id = ?, checkout_url = ?, expires_at = ? WHERE id = ?");
+const fundStatus = db.prepare("UPDATE bounty_funds SET status = ? WHERE id = ? AND status IN ('awaiting_payment','expired','payment_failed')");
+const confirmFund = db.prepare(`UPDATE bounty_funds SET status = 'paid', payment_tx_id = ?, payment_signature = ?, paid_at = ?
+  WHERE id = ? AND status IN ('awaiting_payment','expired','payment_failed')`);
+const awardFund = db.prepare("UPDATE bounty_funds SET status = 'awarded', winner_name = ?, winner_wallet = ?, awarded_at = ? WHERE id = ? AND status = 'paid'");
+const requestRefund = db.prepare("UPDATE bounty_funds SET status = 'refund_requested' WHERE bounty_id = ? AND status = 'paid'");
+const fundById = db.prepare("SELECT * FROM bounty_funds WHERE id = ?");
+const fundByCharge = db.prepare("SELECT * FROM bounty_funds WHERE charge_token = ?");
+const fundByTransaction = db.prepare("SELECT id FROM bounty_funds WHERE payment_tx_id = ?");
+const latestFund = db.prepare("SELECT * FROM bounty_funds WHERE bounty_id = ? ORDER BY (status = 'paid') DESC, created_at DESC LIMIT 1");
+const paidFund = db.prepare("SELECT * FROM bounty_funds WHERE bounty_id = ? AND status = 'paid' ORDER BY paid_at LIMIT 1");
+const myFundsQ = db.prepare(`SELECT * FROM bounty_funds WHERE builder_id = ? AND status IN ('awarded','refund_requested','paid_out','refunded')
+  ORDER BY created_at DESC LIMIT 10`);
+const openEscrowOf = db.prepare("SELECT 1 FROM bounty_funds WHERE builder_id = ? AND status IN ('paid','awarded','refund_requested') LIMIT 1");
+const myUnclosedBounty = db.prepare("SELECT 1 FROM bounties WHERE id = ? AND builder_id = ? AND closed_at IS NULL");
+const myOpenBounty = db.prepare("SELECT * FROM bounties WHERE id = ? AND builder_id = ? AND closed_at IS NULL AND expires_at > ?");
+function fundingView(f) {
+  if (!f) return null;
+  return { id: f.id, title: f.title, status: f.status, reward: f.reward_usd, fee: f.fee_usd, total: f.total_usd,
+    checkoutUrl: f.status === "awaiting_payment" ? f.checkout_url : null, expiresAt: f.expires_at,
+    winner: f.winner_name || null, wallet: f.winner_wallet || null, signature: f.settle_signature || null };
+}
+// El escrow custodia dinero de terceros: se enciende explícitamente con BOUNTY_ESCROW=1 en el servicio.
+const ESCROW_ON = process.env.BOUNTY_ESCROW === "1";
+const bountyPayments = () => ({ enabled: ESCROW_ON && !!MOONPAY, feeBps: FEE_BPS, minFee: MIN_FEE_USD, minReward: MIN_REWARD_USD, maxReward: MAX_REWARD_USD });
+
+// Mismo criterio que la tienda: solo la consulta a MoonPay (nunca el webhook ni el navegador) confirma un depósito.
+async function reconcileFunding(f) {
+  if (!["awaiting_payment", "expired", "payment_failed"].includes(f.status) || !f.charge_token) return f;
+  if (!MOONPAY) throw new Error("Payment verification is unavailable.");
+  const result = validateCharge(await MOONPAY.getCharge(f.charge_token), f, MOONPAY_CONFIG);
+  if (result.status === "paid") {
+    persistWithEmail(() => {
+      const used = fundByTransaction.get(result.transactionId);
+      if ((used && used.id !== f.id) || orderByTransaction.get(result.transactionId))
+        throw new Error("Payment transaction is already attached to another order.");
+      confirmFund.run(result.transactionId, result.signature, Date.now(), f.id);
+    });
+    broadcast({ type: "bounties" });
+  } else if (result.status !== f.status) fundStatus.run(result.status, f.id);
+  if (result.status !== f.status) scheduleBackup();
+  return fundById.get(f.id);
+}
+
+async function fundBounty(res, builder, id) {
+  if (!ESCROW_ON || !MOONPAY) return json(res, 503, { error: "Escrow payments are not available right now." });
+  if (limited("fund:" + builder.id, 10, HOUR)) return json(res, 429, { error: "Too many attempts, please wait a while." });
+  const x = myOpenBounty.get(id, builder.id, Date.now());
+  if (!x) return json(res, 404, { error: "Bounty not found." });
+  if (!x.reward_usd) return json(res, 400, { error: "This bounty has no USD reward to deposit." });
+  let f = latestFund.get(id);
+  // un cobro que nunca recibió checkout (caída a mitad de la creación) no bloquea el bounty para siempre
+  if (f?.status === "awaiting_payment" && !f.charge_token && f.created_at < Date.now() - 2 * 60_000) {
+    fundStatus.run("payment_failed", f.id); f = fundById.get(f.id);
+  }
+  if (f) {
+    try { f = await reconcileFunding(f); } catch { return json(res, 502, { error: "Payment status is temporarily unavailable. Please try again." }); }
+    if (f.status === "awaiting_payment" && f.checkout_url) return json(res, 200, { ok: true, funding: fundingView(f) });
+    if (!["expired", "payment_failed"].includes(f.status)) return json(res, 409, { error: "This bounty is already funded." });
+  }
+  const q = bountyQuote(x.reward_usd);
+  const row = { id: randomUUID(), payment_amount: usdToMinor(q.total), payment_currency: USD_ID };
+  try { insertFund.run(row.id, x.id, builder.id, x.title, q.reward, q.fee, q.total, row.payment_amount, row.payment_currency, Date.now()); }
+  catch { return json(res, 409, { error: "A checkout for this bounty is already open." }); }
+  scheduleBackup();
+  try {
+    const charge = await MOONPAY.createCharge(row, { returnUrl: `https://latamacc.si/?bounty=${x.id}#bounties`, customerDetails: {
+      email: builder.email, fullName: builder.name, country: builder.country,
+      additionalJSON: JSON.stringify({ bountyId: x.id, fundingId: row.id, reward: q.reward, fee: q.fee }) } });
+    attachFund.run(charge.token, charge.id, charge.checkoutUrl, charge.expiresAt, row.id);
+  } catch {
+    fundStatus.run("payment_failed", row.id);
+    return json(res, 502, { error: "Checkout is temporarily unavailable. Please try again." });
+  }
+  json(res, 201, { ok: true, funding: fundingView(fundById.get(row.id)) });
+}
+
+async function fundingStatus(req, res, builder, id) {
+  if (limited("fundstatus:" + builder.id, 60)) return json(res, 429, { error: "Please wait before checking again." });
+  let f = latestFund.get(id);
+  if (!f || f.builder_id !== builder.id) return json(res, 404, { error: "No deposit for this bounty." });
+  try { f = await reconcileFunding(f); } catch { return json(res, 502, { error: "Payment status is temporarily unavailable. Please try again." }); }
+  json(res, 200, { ok: true, funding: fundingView(f), me: me(byId.get(builder.id)) });
+}
+
+// El autor elige ganador: el bounty se cierra y el pago queda en la cola de LATAMACC.
+async function awardBounty(req, res, builder, id) {
+  let b;
+  try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
+  const winner = clean(b.winner, 80), wallet = clean(b.wallet, 64);
+  if (winner.length < 2) return json(res, 400, { error: "Add the winner's name." });
+  if (!solanaAddressOk(wallet)) return json(res, 400, { error: "Add the winner's Solana wallet address (USDC is paid on Solana)." });
+  const awarded = persistWithEmail(() => {
+    const f = paidFund.get(id);
+    if (!f || f.builder_id !== builder.id || !myUnclosedBounty.get(id, builder.id)) return false;
+    awardFund.run(winner, wallet, Date.now(), f.id);
+    closeBounty.run(Date.now(), id, builder.id);
+    return true;
+  });
+  if (!awarded) return json(res, 409, { error: "Only open bounties with money in escrow can be awarded." });
   scheduleBackup();
   broadcast({ type: "bounties" });
   json(res, 200, { ok: true, me: me(byId.get(builder.id)) });
@@ -604,7 +747,8 @@ async function reconcilePayment(order) {
   if (result.status === "paid") {
     persistWithEmail(() => {
       const used = orderByTransaction.get(result.transactionId);
-      if (used && used.id !== order.id) throw new Error("Payment transaction is already attached to another order.");
+      if ((used && used.id !== order.id) || fundByTransaction.get(result.transactionId))
+        throw new Error("Payment transaction is already attached to another order.");
       if (confirmPayment.run(result.transactionId, result.signature, Date.now(), order.id).changes)
         EMAIL.enqueue("paid", order);
     });
@@ -635,10 +779,10 @@ async function moonpayWebhook(req, res) {
   try { payload = JSON.parse(raw.toString("utf8")); }
   catch { return json(res, 400, { error: "Invalid request." }); }
   if (payload.event !== "CREATED" || typeof payload.chargeToken !== "string") return json(res, 200, { ok: true });
-  const order = orderByCharge.get(payload.chargeToken);
-  if (!order) return json(res, 200, { ok: true });
+  const order = orderByCharge.get(payload.chargeToken), fund = order ? null : fundByCharge.get(payload.chargeToken);
+  if (!order && !fund) return json(res, 200, { ok: true });
   // Signed notifications trigger a separate provider lookup; the payload itself never authorizes fulfilment.
-  try { await reconcilePayment(order); }
+  try { if (order) await reconcilePayment(order); else await reconcileFunding(fund); }
   catch { return json(res, 503, { error: "Payment verification unavailable." }); }
   return json(res, 200, { ok: true });
 }
@@ -725,6 +869,10 @@ const server = createServer(async (req, res) => {
       if (pathname === "/api/me/bounties" && req.method === "POST") return await postBounty(req, res, builder);
       const closeB = /^\/api\/me\/bounties\/([0-9a-f-]{36})\/close$/.exec(pathname);
       if (closeB && req.method === "POST") return endBounty(res, builder, closeB[1]);
+      const fundB = /^\/api\/me\/bounties\/([0-9a-f-]{36})\/(fund|award)$/.exec(pathname);
+      if (fundB && fundB[2] === "fund" && req.method === "POST") return await fundBounty(res, builder, fundB[1]);
+      if (fundB && fundB[2] === "fund" && req.method === "GET") return await fundingStatus(req, res, builder, fundB[1]);
+      if (fundB && fundB[2] === "award" && req.method === "POST") return await awardBounty(req, res, builder, fundB[1]);
       const close = /^\/api\/me\/jobs\/([0-9a-f-]{36})\/close$/.exec(pathname);
       if (close && req.method === "POST") return endJob(res, builder, close[1]);
       return json(res, 404, { error: "not found" });

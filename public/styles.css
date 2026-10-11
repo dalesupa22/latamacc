@@ -397,6 +397,12 @@ button.badge { background: none; font: inherit; font-size: 11px; cursor: pointer
 .badge.cat-intro { border-color: rgba(240,200,110,.6); color: var(--fire2); }
 .bounty-due { color: var(--mute); font-size: 12px; }
 .bounty-due.urgent { color: #f0b46a; }
+.badge.escrow { border-color: rgba(240,200,110,.6); color: #1a1204; background: linear-gradient(135deg, #fff1c2, #e9c063 45%, #b8862b); font-weight: 600; }
+.bounty.funded { border-color: rgba(240,200,110,.45); }
+.card-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.card-foot .card-actions a.btn.primary { color: #1a1204; }
+.escrow-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.escrow-row span { display: block; color: var(--mute); font-size: 12px; }
 .jobs-empty { grid-column: 1 / -1; list-style: none; border: 1px solid rgba(240,200,110,.35); border-radius: 18px; padding: 28px;
   background: linear-gradient(120deg, rgba(240,200,110,.09), transparent 60%); display: grid; gap: 14px; justify-items: start; }
 .jobs-empty b { font-size: 22px; letter-spacing: -.02em; }

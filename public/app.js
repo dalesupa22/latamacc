@@ -845,15 +845,30 @@ function due(ts) {
   const d = Math.ceil((ts - Date.now()) / 86400_000);
   return d <= 1 ? "Ends today" : d <= 7 ? `Ends in ${d} days` : `Ends ${new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Bogota" })}`;
 }
+// escrow: recompensa depositada con MoonPay; LATAMACC la custodia y le paga al ganador
+const bountyPay = { enabled: false, feeBps: 1000, minFee: 5, minReward: 25, maxReward: 25000 };
+const feeOf = usd => Math.max(bountyPay.minFee, Math.ceil(usd * bountyPay.feeBps / 10000));
+const usd = n => "$" + Number(n).toLocaleString("en-US");
+const ESCROW_STATUS = { awarded: "Winner picked · payout pending", refund_requested: "Refund requested", paid_out: "Paid to winner ✦", refunded: "Refunded" };
+function fundingActions(x) {
+  const f = x.funding;
+  if (x.funded) return `<button class="btn small" type="button" data-award-bounty="${esc(x.id)}">Pick winner</button>`;
+  if (!x.rewardUsd || !bountyPay.enabled) return "";
+  if (f?.status === "awaiting_payment" && checkoutUrl(f.checkoutUrl))
+    return `<a class="btn small primary" href="${esc(checkoutUrl(f.checkoutUrl))}" rel="noopener">Complete deposit ↗</a>
+      <button class="btn small" type="button" data-check-fund="${esc(x.id)}">Check payment</button>`;
+  return `<button class="btn small primary" type="button" data-fund-bounty="${esc(x.id)}">Deposit ${usd(x.rewardUsd + feeOf(x.rewardUsd))}</button>`;
+}
 function bountyCard(x, mine = false) {
   const submit = applyUrl(x.submit), soon = x.deadline - Date.now() < 3 * 86400_000;
-  return `<li class="job bounty">
-    <div class="job-tags"><span class="badge cat-${esc(x.category)}">${CATS[x.category] || ""}</span><span class="bounty-due ${soon ? "urgent" : ""}">${due(x.deadline)}</span></div>
+  return `<li class="job bounty${x.funded ? " funded" : ""}">
+    <div class="job-tags"><span class="badge cat-${esc(x.category)}">${CATS[x.category] || ""}</span>${x.funded ? `<span class="badge escrow" title="The reward is deposited with Latam/acc and paid to the winner">✦ Funded · in escrow</span>` : ""}<span class="bounty-due ${soon ? "urgent" : ""}">${due(x.deadline)}</span></div>
     <span class="bounty-reward">${esc(x.reward)}</span>
     <div class="job-top">${avatar(x.poster)}<div><b>${esc(x.title)}</b><span>posted by ${esc(x.poster.name)} · ${ago(x.ts)}</span></div></div>
     ${x.description ? `<p>${esc(x.description)}</p>` : ""}
+    ${mine && x.rewardUsd && !x.funded && bountyPay.enabled ? `<p class="fine">Deposit ${usd(x.rewardUsd)} + ${usd(feeOf(x.rewardUsd))} Latam/acc fee with MoonPay (USDC on Solana). We hold it and pay the winner in USDC on Solana.</p>` : ""}
     <div class="card-foot"><span></span>${mine
-      ? `<button class="btn small" type="button" data-close-bounty="${esc(x.id)}">Close bounty</button>`
+      ? `<span class="card-actions">${fundingActions(x)}<button class="btn small" type="button" data-close-bounty="${esc(x.id)}">Close bounty</button></span>`
       : submit ? `<a class="btn small primary" href="${esc(submit)}" target="_blank" rel="noopener nofollow">Submit ↗</a>` : ""}</div>
   </li>`;
 }
@@ -937,6 +952,9 @@ function renderMe() {
   pform.querySelector(".also").open = m.also.length > 0;
   syncKind(pform); syncAlso(pform);
   $("#my-bounties").innerHTML = m.bounties?.length ? `<li class="form-title">Your open bounties</li>` + m.bounties.map(x => bountyCard(x, true)).join("") : "";
+  $("#my-escrow").innerHTML = m.escrow?.length ? `<li class="form-title">Escrow payouts</li>` + m.escrow.map(f => `<li class="job escrow-row">
+    <div><b>${esc(f.title)}</b><span>${usd(f.reward)} · ${ESCROW_STATUS[f.status] || esc(f.status)}${f.winner ? ` · ${esc(f.winner)}` : ""}</span></div>
+    ${f.signature ? `<a class="btn small" href="https://solscan.io/tx/${encodeURIComponent(f.signature)}" target="_blank" rel="noopener">Transaction ↗</a>` : ""}</li>`).join("") : "";
   $("#my-jobs").innerHTML = m.jobs.length ? `<li class="form-title">Your open jobs</li>` + m.jobs.map(j => jobCard(j, true)).join("") : "";
 }
 function formMsg(f, text, ok = false) { const m = f.querySelector(".form-msg"); m.className = `form-msg ${ok ? "ok" : "err"}`; m.textContent = text; }
@@ -1009,10 +1027,49 @@ bform.addEventListener("submit", async e => {
   finally { btn.disabled = false; }
 });
 $("#my-bounties").addEventListener("click", async e => {
+  const fund = e.target.closest("[data-fund-bounty]")?.dataset.fundBounty, check = e.target.closest("[data-check-fund]")?.dataset.checkFund;
+  const award = e.target.closest("[data-award-bounty]")?.dataset.awardBounty;
+  if (fund) {
+    e.target.disabled = true;
+    try {
+      const j = await api(`/api/me/bounties/${fund}/fund`, { method: "POST" });
+      const url = checkoutUrl(j.funding?.checkoutUrl);
+      if (!url) throw new Error("Checkout is unavailable. Please try again.");
+      location.assign(url);
+    } catch (err) { toast(err.message); e.target.disabled = false; }
+    return;
+  }
+  if (check) return checkFunding(check);
+  if (award) {
+    const winner = prompt("Who delivered? Winner's name");
+    if (!winner) return;
+    const wallet = prompt("Winner's Solana wallet address (Latam/acc pays the reward there in USDC)");
+    if (!wallet) return;
+    try { await api(`/api/me/bounties/${award}/award`, { method: "POST", json: { winner, wallet: wallet.trim() } }); toast("Winner saved ✦ Latam/acc will send the payout."); loadBounties(); }
+    catch (err) { toast(err.message); }
+    return;
+  }
   const id = e.target.closest("[data-close-bounty]")?.dataset.closeBounty;
-  if (!id || !confirm("Close this bounty? It will disappear from the Bounties section.")) return;
+  const funded = member.me?.bounties?.find(x => x.id === id)?.funded;
+  if (!id || !confirm(funded ? "Close this bounty without a winner? We'll refund the reward you deposited (the fee is not refunded)." : "Close this bounty? It will disappear from the Bounties section.")) return;
   try { await api(`/api/me/bounties/${id}/close`, { method: "POST" }); loadBounties(); } catch (err) { toast(err.message); }
 });
+async function checkFunding(id, quiet = false) {
+  try {
+    const j = await api(`/api/me/bounties/${id}/fund`);
+    const s = j.funding?.status;
+    toast(s === "paid" ? "Deposit confirmed ✦ Your bounty now shows as funded." : s === "awaiting_payment" ? "Payment not confirmed yet. Complete it in MoonPay and check again."
+      : s === "expired" ? "That checkout expired. Start a new deposit." : s === "payment_failed" ? "The payment didn't go through. Try the deposit again." : "Deposit updated.");
+    loadBounties();
+  } catch (err) { if (!quiet) toast(err.message); }
+}
+// vuelta desde MoonPay: ?bounty=<id>
+function bountyReturn() {
+  const id = new URLSearchParams(location.search).get("bounty");
+  if (!id || !/^[0-9a-f-]{36}$/.test(id)) return;
+  history.replaceState(null, "", location.pathname + location.hash);
+  if (member.session) { openMe("bounties"); checkFunding(id); }
+}
 $("#my-jobs").addEventListener("click", async e => {
   const id = e.target.closest("[data-close-job]")?.dataset.closeJob;
   if (!id || !confirm("Close this job? It will disappear from the Jobs section.")) return;
@@ -1239,6 +1296,12 @@ addEventListener("resize", layout);
   if (state.you && S.byCode[state.you]) { if (!sel.value) sel.value = state.you; psel.value = state.you; }
   guard.ft = state.ft || ""; guard.sitekey = state.turnstile; loadTurnstile();
   Object.assign(merchPayments, state.merchPayments || {}); poButton();
+  Object.assign(bountyPay, state.bountyPayments || {});
+  if (bountyPay.enabled) {
+    $(".escrow-field").hidden = false;
+    $("#bounties-lead").textContent = "Rewards from members for sales intros, product work and content. Pick one, deliver, and get paid. Bounties marked Funded are held in escrow by Latam/acc and paid to the winner. Posting is free.";
+    $("#bounty-terms").textContent = `Bounties are public with your profile name. Pay the winner directly, or add an escrow amount and deposit it with MoonPay: Latam/acc holds it, charges a ${bountyPay.feeBps / 100}% fee (min $${bountyPay.minFee}) and pays the winner in USDC on Solana. If you close it without a winner, we refund the reward (not the fee).`;
+  }
   if (merchPayments.tee) {
     $("#merch-lead").textContent = "The first Latam/acc drop, built in public. Two tees and two caps, made for builders. Pre-order with MoonPay.";
   }
@@ -1253,7 +1316,7 @@ addEventListener("resize", layout);
     }
   });
   renderStats(); renderFeed(false); renderBoard(); renderGrowth(); renderChips(); syncKind();
-  loadDir(); loadJobs(); loadBounties(); consumeSignin();
+  loadDir(); loadJobs(); loadBounties(); consumeSignin(); bountyReturn();
   addEventListener("hashchange", consumeSignin);
   connect();
   requestAnimationFrame(frame);
