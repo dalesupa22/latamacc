@@ -101,3 +101,19 @@ test("members can share a booking link and the directory filters people open to 
     assert.equal((await fetch(app.base + "/api/state").then(r => r.json())).openToCalls, 1);
   } finally { if (app) await app.stop(); rmSync(dir, { recursive: true }); }
 });
+
+test("Caribbean islands, including Curaçao, are valid countries", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "latamacc-caribbean-test-"));
+  let app;
+  try {
+    app = await launch(dir);
+    const s = await fetch(app.base + "/api/state").then(r => r.json());
+    await new Promise(r => setTimeout(r, 3050));
+    const join = body => fetch(app.base + "/api/register", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "person", ft: s.ft, ...body }) });
+    for (const [i, cc] of ["CW", "AW", "JM", "TT", "BB", "BS", "GP", "MQ", "BQ", "KY", "BL"].entries())
+      assert.equal((await join({ name: "Islander " + i, email: `i${i}@example.test`, country: cc })).status, 201, cc);
+    assert.equal((await join({ name: "Nope", email: "nope@example.test", country: "FR" })).status, 400);
+    assert.equal((await fetch(app.base + "/api/directory?country=CW").then(r => r.json())).entries[0].name, "Islander 0");
+  } finally { if (app) await app.stop(); rmSync(dir, { recursive: true }); }
+});

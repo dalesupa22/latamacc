@@ -126,6 +126,8 @@ function buildGeometry() {
       if (v >= 0) (countries[v].samples ||= []).push(p);
     }
   }
+  // islas tan pequeñas que no alcanzan a tener muestras (San Bartolomé, Anguila…): sus luces van en el centro
+  countries.forEach((c, i) => { if (!c.deco && !c.samples?.length) c.samples = [{ x: c.centroid[0], y: c.centroid[1], c: i }]; });
   landByY = land.slice().sort((a, b) => a.y - b.y);
   for (const c of countries) for (const ring of c.rings) for (let k = 0; k < ring.length; k += 2) edge.push({ x: ring[k][0], y: ring[k][1] });
 
@@ -565,6 +567,7 @@ function countUp(el, to) {
 function renderStats() {
   countUp($("#total"), S.total);
   countUp($("#countries-lit"), Object.values(S.byCountry).filter(n => n > 0).length);
+  $("#countries-of").textContent = `/ ${S.countries.filter(c => !c.deco).length} countries`;
 }
 const ago = ts => { const s = (Date.now() - ts) / 1000; return s < 60 ? "just now" : s < 3600 ? `${s / 60 | 0} min ago` : s < 86400 ? `${s / 3600 | 0} h ago` : `${s / 86400 | 0} d ago`; };
 const safeUrl = u => /^https?:\/\//i.test(u || "") ? u : "";
