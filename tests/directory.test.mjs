@@ -50,3 +50,34 @@ test("nomads appear in every country they build from, and growth counts members 
     assert.ok(!JSON.stringify(after).includes("@example.test"));
   } finally { if (app) await app.stop(); rmSync(dir, { recursive: true }); }
 });
+
+test("referral links record who invited each member", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "latamacc-referral-test-"));
+  let app;
+  try {
+    app = await launch(dir);
+    const s = await fetch(app.base + "/api/state").then(r => r.json());
+    await new Promise(r => setTimeout(r, 3050));
+    const join = body => fetch(app.base + "/api/register", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "person", country: "CO", ft: s.ft, ...body }) }).then(r => r.json());
+    const ana = (await join({ name: "Ana", email: "ana@example.test" })).builder;
+    assert.match(ana.ref, /^[0-9a-f]{8}$/);
+    assert.equal(ana.invitedBy, null);
+    assert.equal((await fetch(app.base + "/api/invite?ref=zzzz").then(r => r.status)), 404);
+    assert.deepEqual(await fetch(app.base + "/api/invite?ref=" + ana.ref).then(r => r.json()), { ref: ana.ref, name: "Ana", n: ana.n, kind: "person", country: "CO" });
+
+    const bo = (await join({ name: "Bo", email: "bo@example.test", ref: ana.ref })).builder;
+    assert.deepEqual(bo.invitedBy, { id: ana.id, name: "Ana", n: ana.n });
+    await join({ name: "Cy", email: "cy@example.test", ref: ana.ref });
+    // un código inválido o desconocido no rompe el registro
+    assert.equal((await join({ name: "Di", email: "di@example.test", ref: "deadbeef" })).builder.invitedBy, null);
+    assert.equal((await join({ name: "Ed", email: "ed@example.test", ref: "<script>" })).builder.invitedBy, null);
+
+    const st = await fetch(app.base + "/api/state").then(r => r.json());
+    assert.equal(st.referred, 2);
+    assert.deepEqual(st.topInviters.map(r => [r.name, r.invited]), [["Ana", 2]]);
+    const entries = (await fetch(app.base + "/api/directory").then(r => r.json())).entries;
+    assert.equal(entries.find(e => e.name === "Ana").invited, 2);
+    assert.equal(entries.find(e => e.name === "Bo").invitedBy.name, "Ana");
+  } finally { if (app) await app.stop(); rmSync(dir, { recursive: true }); }
+});

@@ -38,7 +38,7 @@ const cols = new Set(db.prepare("PRAGMA table_info(builders)").all().map(c => c.
 // also: otros países donde también construye (nómadas), como arreglo JSON de códigos.
 // avatar: clave en S3 de la foto o logo; updated_at: última edición del perfil.
 for (const [col, def] of [["kind", "TEXT NOT NULL DEFAULT 'person'"], ["company", "TEXT"], ["website", "TEXT"], ["also", "TEXT NOT NULL DEFAULT '[]'"],
-  ["avatar", "TEXT"], ["updated_at", "INTEGER"]])
+  ["avatar", "TEXT"], ["updated_at", "INTEGER"], ["referred_by", "TEXT"]])
   if (!cols.has(col)) db.exec(`ALTER TABLE builders ADD COLUMN ${col} ${def}`);
 // Empleos publicados por miembros; vencen a los 60 días o cuando su autor los cierra.
 db.exec(`CREATE TABLE IF NOT EXISTS jobs (
@@ -74,7 +74,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS member_tokens (
   hash TEXT PRIMARY KEY, builder_id TEXT NOT NULL, kind TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
   CREATE INDEX IF NOT EXISTS member_tokens_builder ON member_tokens(builder_id);`);
 const HIRING = `(SELECT COUNT(*) FROM jobs WHERE jobs.builder_id = builders.id AND jobs.closed_at IS NULL AND jobs.expires_at > unixepoch() * 1000) AS hiring`;
-const insert = db.prepare(`INSERT INTO builders (id,kind,name,company,email,country,also,city,building,website,handle,ip,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+const insert = db.prepare(`INSERT INTO builders (id,kind,name,company,email,country,also,city,building,website,handle,ip,created_at,referred_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 const directoryQ = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders
   WHERE (:country = '' OR country = :country OR EXISTS (SELECT 1 FROM json_each(builders.also) j WHERE j.value = :country))
     AND (:kind = '' OR kind = :kind)
@@ -204,10 +204,22 @@ function persistWithEmail(write) {
 
 // El correo no se expone públicamente; se transmite a Brevo para confirmaciones transaccionales.
 function publicView(r) {
+  const by = r.referred_by ? inviterQ.get(r.referred_by) : null;
   return { id: r.id, n: r.n, kind: r.kind || "person", name: r.name, company: r.company || "", country: r.country, city: r.city || "",
     also: alsoOf(r), building: r.building || "", website: r.website || "", handle: r.handle || "", ts: r.created_at,
-    avatar: r.avatar ? `/media/${r.avatar}` : "", hiring: r.hiring || 0 };
+    avatar: r.avatar ? `/media/${r.avatar}` : "", hiring: r.hiring || 0,
+    ref: refOf(r.id), invitedBy: by ? { id: by.id, name: by.name, n: by.n } : null, invited: invitedCountQ.get(r.id).n };
 }
+// ---------- referidos: cada miembro invita con latamacc.si/?ref=<8 primeros caracteres de su id> ----------
+const refOf = id => String(id).slice(0, 8);
+const REF_RE = /^[0-9a-f]{8}$/;
+const inviterQ = db.prepare("SELECT rowid AS n, id, name FROM builders WHERE id = ?");
+const invitedCountQ = db.prepare("SELECT COUNT(*) n FROM builders WHERE referred_by = ?");
+const byRefQ = db.prepare("SELECT rowid AS n, id, name, kind, country FROM builders WHERE substr(id, 1, 8) = ? ORDER BY created_at LIMIT 1");
+const topInvitersQ = db.prepare(`SELECT b.rowid AS n, b.id, b.name, b.country, COUNT(*) invited FROM builders r JOIN builders b ON b.id = r.referred_by
+  GROUP BY b.id ORDER BY invited DESC, MIN(r.created_at) LIMIT 5`);
+const referredTotalQ = db.prepare("SELECT COUNT(*) n FROM builders WHERE referred_by IS NOT NULL");
+const inviterOf = code => REF_RE.test(String(code || "")) ? byRefQ.get(String(code)) : null;
 function alsoOf(r) { try { const a = JSON.parse(r.also || "[]"); return Array.isArray(a) ? a.filter(c => COUNTRIES.has(c)) : []; } catch { return []; } }
 // hasta 4 países adicionales válidos, sin repetir el principal
 function cleanAlso(v, primary) {
@@ -226,6 +238,8 @@ function state() {
     points: pointsQ.all().map(r => ({ id: r.id, kind: r.kind || "person", name: r.name, city: r.city || "", country: r.country, also: alsoOf(r), ts: r.created_at })),
     growth: growthQ.all().map(r => [r.d, r.n]),
     kinds: Object.fromEntries(kindsQ.all().map(r => [r.kind || "person", r.n])),
+    referred: referredTotalQ.get().n,
+    topInviters: topInvitersQ.all().map(r => ({ id: r.id, n: r.n, name: r.name, country: r.country, invited: r.invited })),
     ...presence(),
     merchPayments: merchPayments(),
     bountyPayments: bountyPayments(),
@@ -288,9 +302,9 @@ async function register(req, res) {
   const existing = byEmail.get(email);
   if (existing) return json(res, 200, { ok: true, existing: true, builder: publicView(existing), canEdit: EMAIL.enabled });
 
-  const row = { id: randomUUID(), ...profile, email, ip, created_at: Date.now() };
+  const row = { id: randomUUID(), ...profile, email, ip, created_at: Date.now(), referred_by: inviterOf(b.ref)?.id || null };
   persistWithEmail(() => {
-    insert.run(row.id, row.kind, row.name, row.company, row.email, row.country, row.also, row.city, row.building, row.website, row.handle, row.ip, row.created_at);
+    insert.run(row.id, row.kind, row.name, row.company, row.email, row.country, row.also, row.city, row.building, row.website, row.handle, row.ip, row.created_at, row.referred_by);
     EMAIL.enqueue("registered", row);
   });
   const pub = publicView({ ...row, n: numberQ.get(row.id).n });
@@ -844,6 +858,11 @@ const server = createServer(async (req, res) => {
       const workplace = WORKPLACES.includes(u.get("workplace")) ? u.get("workplace") : "", type = JOB_TYPES.includes(u.get("type")) ? u.get("type") : "";
       const rows = jobsQ.all({ q, like: `%${q}%`, country, workplace, type, now: Date.now(), offset: Math.max(0, Number(u.get("offset")) || 0) });
       return json(res, 200, { jobs: rows.map(j => jobView(j)) });
+    }
+    if (pathname === "/api/invite" && req.method === "GET") {
+      const inviter = inviterOf(new URL(req.url, "http://x").searchParams.get("ref"));
+      if (!inviter) return json(res, 404, { error: "Invite not found." });
+      return json(res, 200, { ref: refOf(inviter.id), name: inviter.name, n: inviter.n, kind: inviter.kind, country: inviter.country });
     }
     if (pathname === "/api/bounties" && req.method === "GET") {
       const u = new URL(req.url, "http://x").searchParams;

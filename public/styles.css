@@ -126,6 +126,18 @@ h2 { font-size: clamp(30px, 4.6vw, 54px); line-height: 1.04; letter-spacing: -.0
 .gb-y { position: absolute; inset: 0 auto 0 0; width: 30px; pointer-events: none; }
 .gb-y span { position: absolute; right: 0; transform: translateY(-50%); font-size: 11px; color: var(--mute); }
 .gb-x { display: flex; justify-content: space-between; font-size: 11px; color: var(--mute); margin-top: 6px; }
+.invite-note { margin-top: 14px; display: inline-block; border: 1px solid rgba(240,200,110,.45); border-radius: 999px; padding: 6px 14px;
+  font-size: 14px; color: var(--fire2); background: rgba(233,192,99,.08); }
+.invite-box { display: grid; gap: 6px; margin: 14px 0; text-align: left; }
+.invite-box > span { font-size: 11px; color: var(--mute); text-transform: uppercase; }
+.invite-box b { color: var(--fire2); }
+.invite-row { display: flex; gap: 8px; }
+.invite-row input { flex: 1; min-width: 0; background: var(--card); border: 1px solid #332e29; color: var(--fg); border-radius: 10px; padding: 9px 12px; font: 13px "JetBrains Mono", monospace; }
+.inviters { margin-top: 18px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; max-width: 560px; }
+.inviters .board { margin-top: 10px; }
+.invited-by { color: var(--mute); font-size: 12px; }
+.invited-by { display: block; }
+.invited-by .ib { color: #d9d2c5; }
 .howto { margin-top: 22px; list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 22px; max-width: 660px; }
 .howto li { display: flex; gap: 10px; font-size: 14px; color: #cfc9c1; line-height: 1.45; }
 .howto i { color: var(--fire2); font-style: normal; flex: none; }

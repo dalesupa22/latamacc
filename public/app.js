@@ -1,6 +1,15 @@
 // latamacc.si — mapa de Latam en oro (golden era) + directorio en vivo por WebSocket.
 
 const $ = s => document.querySelector(s);
+// ---------- referidos: ?ref=<código> se guarda hasta que la persona se une ----------
+const REF_KEY = "latamacc-ref";
+let inviteRef = "";
+try {
+  const u = new URL(location.href), r = u.searchParams.get("ref");
+  if (r && /^[0-9a-f]{8}$/.test(r)) { localStorage.setItem(REF_KEY, r); u.searchParams.delete("ref"); history.replaceState(null, "", u.pathname + u.search + u.hash); }
+  inviteRef = localStorage.getItem(REF_KEY) || "";
+} catch {}
+const inviteLink = b => `https://latamacc.si/?ref=${b.ref}`;
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const mobile = matchMedia("(max-width: 900px)").matches;
 const flag = cc => String.fromCodePoint(...[...cc].map(c => 0x1f1a5 + c.charCodeAt(0)));
@@ -446,6 +455,7 @@ async function openCountry(cc, id = null) {
         <b>${esc(b.name)} <small class="mono">#${b.n}</small></b>
         <em>${b.kind === "company" ? "Company" : b.company ? `Person @ ${esc(b.company)}` : "Person"}${b.country !== cc ? ` · based in ${flag(b.country)} ${esc(cname(b.country))}` : b.city ? ` · ${esc(b.city)}` : ""}${b.also?.length && b.country === cc ? ` · also in ${b.also.map(flag).join(" ")}` : ""}</em>
         ${b.building ? `<p>✦ ${esc(b.building)}</p>` : ""}
+        ${invitedLine(b)}
       </button><span class="links">${site ? `<a href="${esc(site)}" target="_blank" rel="noopener nofollow" aria-label="${esc(host(site))}">↗</a>` : ""}${b.handle ? `<a href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow" aria-label="@${esc(b.handle)} on X">𝕏</a>` : ""}</span></li>`;
   }).join("") : `<li class="empty">No one in ${esc(c.en)} yet. Be the first to light it up ✦</li>`;
   if (id) selectMember(id);
@@ -502,6 +512,12 @@ function onJoin(b, total) {
   S.total = total ?? S.total + 1;
   const today = bogotaDay(Date.now()), last = S.growth[S.growth.length - 1];
   if (last?.[0] === today) last[1]++; else S.growth.push([today, 1]);
+  if (b.invitedBy) {
+    S.referred = (S.referred || 0) + 1;
+    const t = (S.topInviters ||= []).find(r => r.id === b.invitedBy.id);
+    if (t) t.invited++; else S.topInviters.push({ id: b.invitedBy.id, n: b.invitedBy.n, name: b.invitedBy.name, country: S.points.find(p => p.id === b.invitedBy.id)?.country || b.country, invited: 1 });
+    S.topInviters.sort((x, y) => y.invited - x.invited).splice(5);
+  }
   S.kinds[b.kind] = (S.kinds[b.kind] || 0) + 1;
   S.recent.unshift(b); S.recent = S.recent.slice(0, 30);
   for (const cc of (b.also || [])) { const extra = placePoint(b, cc); if (extra) S.points.push(extra); }
@@ -602,6 +618,11 @@ function renderGrowth() {
   $("#g-to").textContent = "Today";
   renderGrowthBig();
 }
+function renderInviters() {
+  const rows = S.topInviters || [], max = rows[0]?.invited || 1;
+  $("#inv-sum").textContent = S.referred ? `${S.referred.toLocaleString("en")} ${S.referred === 1 ? "member" : "members"} joined through an invite link.` : "Share your invite link: the people you bring show up here.";
+  $("#inviters").innerHTML = rows.map(r => `<li title="${esc(r.name)} invited ${r.invited}"><span>${flag(r.country)}</span><span class="cn">${esc(r.name)}</span><div class="bar"><i style="width:${(r.invited / max) * 100}%"></i></div><b>${r.invited}</b></li>`).join("");
+}
 // gráfico grande: total acumulado (línea) + nuevos por día (barras), con tooltip
 let growthDays = [];
 function renderGrowthBig() {
@@ -619,6 +640,7 @@ function renderGrowthBig() {
   countUp($("#gs-total"), S.total); countUp($("#gs-week"), week);
   countUp($("#gs-countries"), Object.values(S.byCountry).filter(n => n > 0).length);
   countUp($("#gs-people"), S.kinds.person || 0); countUp($("#gs-companies"), S.kinds.company || 0);
+  renderInviters();
   if (!growthDays.length) { svg.innerHTML = ""; $("#gb-x").innerHTML = $("#gb-y").innerHTML = ""; return; }
   const W = 1000, H = 300, P = 34, n = growthDays.length;
   const top = Math.max(1, acc), maxDay = Math.max(1, ...growthDays.map(g => g.n));
@@ -658,7 +680,7 @@ $("#gb-chart").addEventListener("pointerleave", () => { $("#gb-tip").hidden = tr
 function ticker(b) {
   const ol = $("#ticker");
   const li = document.createElement("li");
-  li.innerHTML = `✦ <b>${esc(b.name)}</b> joined from ${flag(b.country)} ${esc(b.city || cname(b.country))}${b.building ? ` <em>· ${esc(b.building)}</em>` : ""}`;
+  li.innerHTML = `✦ <b>${esc(b.name)}</b> joined from ${flag(b.country)} ${esc(b.city || cname(b.country))}${b.invitedBy ? ` <em>· invited by ${esc(b.invitedBy.name)}</em>` : b.building ? ` <em>· ${esc(b.building)}</em>` : ""}`;
   ol.prepend(li);
   while (ol.children.length > 4) ol.lastChild.remove();
   setTimeout(() => { li.classList.add("out"); setTimeout(() => li.remove(), 700); }, 7000);
@@ -693,6 +715,7 @@ function renderDir() {
       <b>${esc(b.name)}</b>${b.kind === "person" && b.company ? `<span class="co">${esc(b.company)}</span>` : ""}
       ${b.building ? `<p>${esc(b.building)}</p>` : ""}
       ${b.also?.length ? `<span class="also-flags">Also in ${b.also.map(flag).join(" ")}</span>` : ""}
+      ${invitedLine(b)}
       <div class="card-foot"><span>${esc([b.city, cname(b.country)].filter(Boolean).join(", "))}</span>
         <span class="links">${site ? `<a href="${esc(site)}" target="_blank" rel="noopener nofollow">${esc(host(site))} ↗</a>` : ""}${b.handle ? `<a href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow">𝕏</a>` : ""}</span></div>
     </li>`;
@@ -781,6 +804,7 @@ form.addEventListener("submit", async e => {
   const msg = $("#form-msg"), btn = $("#submit");
   const data = Object.fromEntries(new FormData(form));
   data.also = alsoOf(form);
+  if (inviteRef) data.ref = inviteRef;
   msg.className = "form-msg"; msg.textContent = "";
   if (!data.name.trim() || !data.email.includes("@") || !data.country) { msg.className = "form-msg err"; msg.textContent = "Please add a name, email and country."; return; }
   btn.disabled = true; btn.textContent = "Joining…";
@@ -791,6 +815,7 @@ form.addEventListener("submit", async e => {
     showDone(j.builder, j.existing);
     if (j.existing) { if (j.canEdit) toast("Already in the directory. Use Edit profile to change it."); return; }
     form.reset(); syncKind(); syncAlso(); $("#also").open = false;
+    if (inviteRef) { inviteRef = ""; $("#invite-note").hidden = true; try { localStorage.removeItem(REF_KEY); } catch {} }
     window.scrollTo({ top: 0, behavior: "smooth" });
     // si el socket no llegó, se pinta localmente
     setTimeout(() => onJoin(j.builder), 700);
@@ -802,11 +827,35 @@ form.addEventListener("submit", async e => {
   }
 });
 
+function invitedLine(b) {
+  const parts = [];
+  if (b.invitedBy) parts.push(`Invited by <span class="ib">${esc(b.invitedBy.name)}</span>`);
+  if (b.invited) parts.push(`✦ ${b.invited} invited`);
+  return parts.length ? `<span class="invited-by">${parts.join(" · ")}</span>` : "";
+}
+async function showInviter() {
+  if (!inviteRef) return;
+  try {
+    const r = await fetch("/api/invite?ref=" + inviteRef);
+    if (!r.ok) { if (r.status === 404) { inviteRef = ""; try { localStorage.removeItem(REF_KEY); } catch {} } return; }
+    const i = await r.json();
+    const note = $("#invite-note");
+    note.textContent = `✦ ${i.name} invited you to Latam/acc`; note.hidden = false;
+  } catch {}
+}
+document.addEventListener("click", async e => {
+  const b = e.target.closest("[data-copy]");
+  if (!b) return;
+  const input = $(b.dataset.copy);
+  try { await navigator.clipboard.writeText(input.value); } catch { input.select(); document.execCommand?.("copy"); }
+  b.textContent = "Copied ✦"; setTimeout(() => (b.textContent = "Copy"), 1800);
+});
 function showDone(b, existing) {
   const text = `${b.kind === "company" ? `${b.name} is` : "I'm"} member #${b.n} of the Latam/acc directory ✦ AI companies and people building the golden era of Latin America:`;
   $("#done-n").textContent = "#" + b.n;
   $("#done-title").textContent = existing ? `${b.name} is already in the directory` : `${b.name}, you're on the map`;
-  $("#done-share").href = `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent("https://latamacc.si")}`;
+  $("#done-share").href = `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(b.ref ? inviteLink(b) : "https://latamacc.si")}`;
+  $("#done-link").value = b.ref ? inviteLink(b) : "https://latamacc.si";
   form.hidden = true; $("#done").hidden = false;
 }
 $("#done-again").addEventListener("click", () => { $("#done").hidden = true; form.hidden = false; $("#form-msg").textContent = ""; });
@@ -942,6 +991,7 @@ function renderMe() {
   $("#me-name").textContent = m.name;
   $("#me-n").textContent = `${m.kind === "company" ? "Company" : "Member"} #${m.n}`;
   $("#me-email").textContent = `Signed in as ${m.email} (private)`;
+  $("#me-link").value = m.ref ? inviteLink(m) : ""; $("#me-invited").textContent = m.invited || 0;
   $("#photo-label").textContent = m.kind === "company" ? "Logo" : "Photo";
   $("#photo-remove").hidden = !m.avatar;
   $("#photo-file").disabled = !member.uploads;
@@ -1286,6 +1336,7 @@ addEventListener("resize", layout);
   S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => sel.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));
 
   S.total = state.total; S.byCountry = state.byCountry; S.recent = state.recent; S.watching = state.watching || {}; S.growth = state.growth || []; S.kinds = state.kinds || {};
+  S.referred = state.referred || 0; S.topInviters = state.topInviters || []; showInviter();
   buildAlso(form); buildAlso(pform);
   for (const sel2 of [pform.country, jform.country, $("#jcountry")])
     S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => sel2.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));

@@ -76,6 +76,7 @@
       <div>
         <p class="kicker mono reveal">01 — Register below</p>
         <h2 class="reveal">Join the directory.</h2>
+        <p id="invite-note" class="invite-note" hidden></p>
         <p class="lead reveal">Building with AI in Latin America? Add yourself or your company. Your light turns on live, on everyone's map.</p>
         <ul class="howto reveal" aria-label="How to join">
           <li><i>✦</i><span><b>Who:</b> founders, engineers, researchers and creators building with AI in or from Latin America, and AI companies.</span></li>
@@ -118,6 +119,11 @@
           <b id="done-n">#1</b>
           <h3 id="done-title">You're on the map</h3>
           <p>Your light is on for everyone. Now bring your people: share it.</p>
+          <div class="invite-box">
+            <span class="mono">Your invite link</span>
+            <div class="invite-row"><input id="done-link" readonly aria-label="Your invite link" /><button class="btn small" type="button" data-copy="#done-link">Copy</button></div>
+            <p class="fine">Everyone who joins with it shows "Invited by you" on their profile.</p>
+          </div>
           <div class="cta">
             <a id="done-share" class="btn primary" target="_blank" rel="noopener">Share on 𝕏</a>
             <button class="btn" type="button" data-me="profile">Edit profile</button>
@@ -179,6 +185,11 @@
         </div>
         <div id="gb-x" class="gb-x mono"></div>
       </figure>
+      <div class="inviters reveal">
+        <div class="feed-head mono">Top inviters</div>
+        <p class="fine" id="inv-sum"></p>
+        <ol id="inviters" class="board"></ol>
+      </div>
     </div>
   </section>
 
@@ -331,6 +342,10 @@
       <div class="me-head">
         <span class="avatar big" id="me-avatar"></span>
         <div><p class="kicker mono" id="me-n">Member</p><h3 id="me-name"></h3><p class="fine" id="me-email"></p></div>
+      </div>
+      <div class="invite-box">
+        <span class="mono">Your invite link · <b id="me-invited">0</b> joined with it</span>
+        <div class="invite-row"><input id="me-link" readonly aria-label="Your invite link" /><button class="btn small" type="button" data-copy="#me-link">Copy</button></div>
       </div>
       <div class="seg small me-tabs" role="tablist">
         <label><input type="radio" name="metab" value="profile" checked /> <span>Profile</span></label>
