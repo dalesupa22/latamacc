@@ -389,6 +389,12 @@ button.badge { background: none; font: inherit; font-size: 11px; cursor: pointer
   border: 1px solid rgba(240,200,110,.45); border-radius: 18px; padding: 28px; box-shadow: 0 30px 120px rgba(0,0,0,.8);
   /* fixed (como todo modal): abierto desde abajo de la página se ve en pantalla, sin subir a buscarlo */
   position: fixed; inset: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* en el celular el panel va arriba (no centrado) para que el teclado no tape el correo ni el mensaje,
+   y la página de atrás no se desplaza mientras está abierto */
+html:has(.me[open]) { overflow: hidden; }
+@media (max-width: 600px) {
+  .me { margin: max(12px, env(safe-area-inset-top)) auto auto; max-height: calc(100dvh - 24px); }
+}
 .me::backdrop { background: rgba(0,0,0,.7); backdrop-filter: blur(4px); }
 .me h3 { font-size: 24px; letter-spacing: -.02em; }
 .me-lead { color: #cfc9c1; margin-top: 8px; }
