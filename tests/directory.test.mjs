@@ -81,3 +81,23 @@ test("referral links record who invited each member", async () => {
     assert.equal(entries.find(e => e.name === "Bo").invitedBy.name, "Ana");
   } finally { if (app) await app.stop(); rmSync(dir, { recursive: true }); }
 });
+
+test("members can share a booking link and the directory filters people open to calls", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "latamacc-calls-test-"));
+  let app;
+  try {
+    app = await launch(dir);
+    const s = await fetch(app.base + "/api/state").then(r => r.json());
+    await new Promise(r => setTimeout(r, 3050));
+    const join = body => fetch(app.base + "/api/register", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "person", country: "CO", ft: s.ft, ...body }) });
+    const ana = await join({ name: "Ana", email: "ana@example.test", calls: "cal.com/ana" }).then(r => r.json());
+    assert.equal(ana.builder.calls, "https://cal.com/ana");
+    assert.equal((await join({ name: "Bo", email: "bo@example.test", calls: "javascript:alert(1)" })).status, 400);
+    assert.equal((await join({ name: "Cy", email: "cy@example.test" })).status, 201);
+    const open = await fetch(app.base + "/api/directory?calls=1").then(r => r.json());
+    assert.deepEqual([open.entries.map(e => e.name), open.count], [["Ana"], 1]);
+    assert.equal((await fetch(app.base + "/api/directory").then(r => r.json())).count, 2);
+    assert.equal((await fetch(app.base + "/api/state").then(r => r.json())).openToCalls, 1);
+  } finally { if (app) await app.stop(); rmSync(dir, { recursive: true }); }
+});

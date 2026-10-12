@@ -456,7 +456,7 @@ async function openCountry(cc, id = null) {
         <em>${b.kind === "company" ? "Company" : b.company ? `Person @ ${esc(b.company)}` : "Person"}${b.country !== cc ? ` · based in ${flag(b.country)} ${esc(cname(b.country))}` : b.city ? ` · ${esc(b.city)}` : ""}${b.also?.length && b.country === cc ? ` · also in ${b.also.map(flag).join(" ")}` : ""}</em>
         ${b.building ? `<p>✦ ${esc(b.building)}</p>` : ""}
         ${invitedLine(b)}
-      </button><span class="links">${site ? `<a href="${esc(site)}" target="_blank" rel="noopener nofollow" aria-label="${esc(host(site))}">↗</a>` : ""}${b.handle ? `<a href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow" aria-label="@${esc(b.handle)} on X">𝕏</a>` : ""}</span></li>`;
+      </button><span class="links">${safeUrl(b.calls) ? `<a href="${esc(safeUrl(b.calls))}" target="_blank" rel="noopener nofollow" aria-label="Book a call with ${esc(b.name)}" title="Book a call">📞</a>` : ""}${site ? `<a href="${esc(site)}" target="_blank" rel="noopener nofollow" aria-label="${esc(host(site))}">↗</a>` : ""}${b.handle ? `<a href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow" aria-label="@${esc(b.handle)} on X">𝕏</a>` : ""}</span></li>`;
   }).join("") : `<li class="empty">No one in ${esc(c.en)} yet. Be the first to light it up ✦</li>`;
   if (id) selectMember(id);
 }
@@ -688,7 +688,7 @@ function ticker(b) {
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(t._h); t._h = setTimeout(() => (t.hidden = true), 4500); }
 
 // ---------- directorio ----------
-const dir = { entries: [], q: "", kind: "", country: "", count: 0, seq: 0, loading: false };
+const dir = { entries: [], q: "", kind: "", country: "", calls: false, count: 0, seq: 0, loading: false };
 const matchesFilter = b => (!dir.kind || b.kind === dir.kind) && (!dir.country || countriesOf(b).includes(dir.country)) &&
   (!dir.q || [b.name, b.company, b.building, b.city].join(" ").toLowerCase().includes(dir.q.toLowerCase()));
 
@@ -716,6 +716,7 @@ function renderDir() {
       ${b.building ? `<p>${esc(b.building)}</p>` : ""}
       ${b.also?.length ? `<span class="also-flags">Also in ${b.also.map(flag).join(" ")}</span>` : ""}
       ${invitedLine(b)}
+      ${callLink(b)}
       <div class="card-foot"><span>${esc([b.city, cname(b.country)].filter(Boolean).join(", "))}</span>
         <span class="links">${site ? `<a href="${esc(site)}" target="_blank" rel="noopener nofollow">${esc(host(site))} ↗</a>` : ""}${b.handle ? `<a href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow">𝕏</a>` : ""}</span></div>
     </li>`;
@@ -727,7 +728,7 @@ async function loadDir(more = false) {
   if (more && (dir.loading || dir.entries.length >= dir.count)) return;
   const seq = more ? dir.seq : ++dir.seq;
   dir.loading = true;
-  const qs = new URLSearchParams({ q: dir.q, kind: dir.kind, country: dir.country, offset: more ? dir.entries.length : 0 });
+  const qs = new URLSearchParams({ q: dir.q, kind: dir.kind, country: dir.country, calls: dir.calls ? "1" : "", offset: more ? dir.entries.length : 0 });
   let j = { entries: [], count: 0 };
   try { j = await fetch("/api/directory?" + qs).then(r => r.json()); } catch {}
   dir.loading = false;
@@ -752,6 +753,7 @@ function filterCountry(cc) {
 }
 $("#q").addEventListener("input", e => { dir.q = e.target.value.trim(); clearTimeout(dirTimer); dirTimer = setTimeout(loadDir, 200); });
 document.querySelectorAll('input[name="fkind"]').forEach(r => r.addEventListener("change", e => { dir.kind = e.target.value; loadDir(); }));
+$("#fcalls").addEventListener("change", e => { dir.calls = e.target.checked; loadDir(); });
 $("#dir").addEventListener("click", e => {
   const name = e.target.closest("[data-hiring]")?.dataset.hiring;
   const card = e.target.closest(".card");
@@ -827,6 +829,7 @@ form.addEventListener("submit", async e => {
   }
 });
 
+const callLink = b => safeUrl(b.calls) ? `<a class="btn small primary call" href="${esc(safeUrl(b.calls))}" target="_blank" rel="noopener nofollow">📞 Book a call</a>` : "";
 function invitedLine(b) {
   const parts = [];
   if (b.invitedBy) parts.push(`Invited by <span class="ib">${esc(b.invitedBy.name)}</span>`);
@@ -997,7 +1000,7 @@ function renderMe() {
   $("#photo-file").disabled = !member.uploads;
   $("#me-profile .photo").hidden = !member.uploads && !m.avatar;
   pform.kind.value = m.kind;
-  for (const k of ["name", "company", "country", "city", "building", "website", "handle"]) pform[k].value = m[k] || "";
+  for (const k of ["name", "company", "country", "city", "building", "website", "handle", "calls"]) pform[k].value = m[k] || "";
   for (const b of pform.querySelectorAll(".also-grid input")) b.checked = m.also.includes(b.value);
   pform.querySelector(".also").open = m.also.length > 0;
   syncKind(pform); syncAlso(pform);
@@ -1336,7 +1339,7 @@ addEventListener("resize", layout);
   S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => sel.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));
 
   S.total = state.total; S.byCountry = state.byCountry; S.recent = state.recent; S.watching = state.watching || {}; S.growth = state.growth || []; S.kinds = state.kinds || {};
-  S.referred = state.referred || 0; S.topInviters = state.topInviters || []; showInviter();
+  S.referred = state.referred || 0; $("#calls-n").textContent = state.openToCalls ? state.openToCalls : ""; S.topInviters = state.topInviters || []; showInviter();
   buildAlso(form); buildAlso(pform);
   for (const sel2 of [pform.country, jform.country, $("#jcountry")])
     S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => sel2.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));

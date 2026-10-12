@@ -126,6 +126,12 @@ h2 { font-size: clamp(30px, 4.6vw, 54px); line-height: 1.04; letter-spacing: -.0
 .gb-y { position: absolute; inset: 0 auto 0 0; width: 30px; pointer-events: none; }
 .gb-y span { position: absolute; right: 0; transform: translateY(-50%); font-size: 11px; color: var(--mute); }
 .gb-x { display: flex; justify-content: space-between; font-size: 11px; color: var(--mute); margin-top: 6px; }
+.calls-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #d9d2c5; border: 1px solid #332e29;
+  border-radius: 999px; padding: 7px 14px; cursor: pointer; }
+.calls-toggle input { accent-color: #e9c063; }
+.calls-toggle:has(input:checked) { border-color: var(--fire2); background: rgba(240,200,110,.12); }
+.calls-toggle small { color: var(--fire2); font-family: "JetBrains Mono", monospace; }
+.btn.call { color: #1a1204; align-self: flex-start; }
 .invite-note { margin-top: 14px; display: inline-block; border: 1px solid rgba(240,200,110,.45); border-radius: 999px; padding: 6px 14px;
   font-size: 14px; color: var(--fire2); background: rgba(233,192,99,.08); }
 .invite-box { display: grid; gap: 6px; margin: 14px 0; text-align: left; }

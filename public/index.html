@@ -108,6 +108,7 @@
             <label><span>Website <span class="opt">(optional)</span></span><input name="website" maxlength="120" inputmode="url" placeholder="startup.ai" /></label>
             <label><span>X handle <span class="opt">(optional)</span></span><input name="handle" maxlength="30" placeholder="@handle" /></label>
           </div>
+          <label><span>Book a call link <span class="opt">(optional · lets members book time with you)</span></span><input name="calls" maxlength="200" inputmode="url" placeholder="cal.com/ana or calendly.com/ana" /></label>
           <input name="hp_field" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
           <p class="fine">Everything except your email is shown publicly in the directory.</p>
           <div class="ts" data-form="join"></div>
@@ -157,6 +158,7 @@
           <label><input type="radio" name="fkind" value="person" /> <span>People</span></label>
           <label><input type="radio" name="fkind" value="company" /> <span>Companies</span></label>
         </div>
+        <label class="calls-toggle"><input type="checkbox" id="fcalls" /> <span>📞 Open to calls <small id="calls-n"></small></span></label>
       </div>
       <ul id="country-chips" class="chips reveal"></ul>
       <p id="dir-count" class="dir-count mono" aria-live="polite"></p>
@@ -384,6 +386,7 @@
             <label><span>Website <span class="opt">(optional)</span></span><input name="website" maxlength="120" inputmode="url" /></label>
             <label><span>X handle <span class="opt">(optional)</span></span><input name="handle" maxlength="30" /></label>
           </div>
+          <label><span>Book a call link <span class="opt">(optional · lets members book time with you)</span></span><input name="calls" maxlength="200" inputmode="url" placeholder="cal.com/you or calendly.com/you" /></label>
           <button class="btn primary big" type="submit">Save changes</button>
           <p class="form-msg" role="status"></p>
         </form>

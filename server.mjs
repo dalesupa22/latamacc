@@ -38,7 +38,7 @@ const cols = new Set(db.prepare("PRAGMA table_info(builders)").all().map(c => c.
 // also: otros países donde también construye (nómadas), como arreglo JSON de códigos.
 // avatar: clave en S3 de la foto o logo; updated_at: última edición del perfil.
 for (const [col, def] of [["kind", "TEXT NOT NULL DEFAULT 'person'"], ["company", "TEXT"], ["website", "TEXT"], ["also", "TEXT NOT NULL DEFAULT '[]'"],
-  ["avatar", "TEXT"], ["updated_at", "INTEGER"], ["referred_by", "TEXT"]])
+  ["avatar", "TEXT"], ["updated_at", "INTEGER"], ["referred_by", "TEXT"], ["calls", "TEXT"]])
   if (!cols.has(col)) db.exec(`ALTER TABLE builders ADD COLUMN ${col} ${def}`);
 // Empleos publicados por miembros; vencen a los 60 días o cuando su autor los cierra.
 db.exec(`CREATE TABLE IF NOT EXISTS jobs (
@@ -74,16 +74,18 @@ db.exec(`CREATE TABLE IF NOT EXISTS member_tokens (
   hash TEXT PRIMARY KEY, builder_id TEXT NOT NULL, kind TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
   CREATE INDEX IF NOT EXISTS member_tokens_builder ON member_tokens(builder_id);`);
 const HIRING = `(SELECT COUNT(*) FROM jobs WHERE jobs.builder_id = builders.id AND jobs.closed_at IS NULL AND jobs.expires_at > unixepoch() * 1000) AS hiring`;
-const insert = db.prepare(`INSERT INTO builders (id,kind,name,company,email,country,also,city,building,website,handle,ip,created_at,referred_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+const insert = db.prepare(`INSERT INTO builders (id,kind,name,company,email,country,also,city,building,website,handle,ip,created_at,referred_by,calls) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 const directoryQ = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders
   WHERE (:country = '' OR country = :country OR EXISTS (SELECT 1 FROM json_each(builders.also) j WHERE j.value = :country))
     AND (:kind = '' OR kind = :kind)
     AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like)
+    AND (:calls = 0 OR COALESCE(calls, '') <> '')
   ORDER BY created_at DESC LIMIT 60 OFFSET :offset`);
 const directoryCountQ = db.prepare(`SELECT COUNT(*) n FROM builders
   WHERE (:country = '' OR country = :country OR EXISTS (SELECT 1 FROM json_each(builders.also) j WHERE j.value = :country))
     AND (:kind = '' OR kind = :kind)
-    AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like)`);
+    AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like)
+    AND (:calls = 0 OR COALESCE(calls, '') <> '')`);
 const byEmail = db.prepare(`SELECT rowid AS n, * FROM builders WHERE email = ?`);
 const byId = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders WHERE id = ?`);
 const recentQ = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders ORDER BY created_at DESC LIMIT 30`);
@@ -207,7 +209,7 @@ function publicView(r) {
   const by = r.referred_by ? inviterQ.get(r.referred_by) : null;
   return { id: r.id, n: r.n, kind: r.kind || "person", name: r.name, company: r.company || "", country: r.country, city: r.city || "",
     also: alsoOf(r), building: r.building || "", website: r.website || "", handle: r.handle || "", ts: r.created_at,
-    avatar: r.avatar ? `/media/${r.avatar}` : "", hiring: r.hiring || 0,
+    avatar: r.avatar ? `/media/${r.avatar}` : "", hiring: r.hiring || 0, calls: r.calls || "",
     ref: refOf(r.id), invitedBy: by ? { id: by.id, name: by.name, n: by.n } : null, invited: invitedCountQ.get(r.id).n };
 }
 // ---------- referidos: cada miembro invita con latamacc.si/?ref=<8 primeros caracteres de su id> ----------
@@ -218,6 +220,7 @@ const invitedCountQ = db.prepare("SELECT COUNT(*) n FROM builders WHERE referred
 const byRefQ = db.prepare("SELECT rowid AS n, id, name, kind, country FROM builders WHERE substr(id, 1, 8) = ? ORDER BY created_at LIMIT 1");
 const topInvitersQ = db.prepare(`SELECT b.rowid AS n, b.id, b.name, b.country, COUNT(*) invited FROM builders r JOIN builders b ON b.id = r.referred_by
   GROUP BY b.id ORDER BY invited DESC, MIN(r.created_at) LIMIT 5`);
+const callsOpenQ = db.prepare("SELECT COUNT(*) n FROM builders WHERE COALESCE(calls, '') <> ''");
 const referredTotalQ = db.prepare("SELECT COUNT(*) n FROM builders WHERE referred_by IS NOT NULL");
 const inviterOf = code => REF_RE.test(String(code || "")) ? byRefQ.get(String(code)) : null;
 function alsoOf(r) { try { const a = JSON.parse(r.also || "[]"); return Array.isArray(a) ? a.filter(c => COUNTRIES.has(c)) : []; } catch { return []; } }
@@ -239,6 +242,7 @@ function state() {
     growth: growthQ.all().map(r => [r.d, r.n]),
     kinds: Object.fromEntries(kindsQ.all().map(r => [r.kind || "person", r.n])),
     referred: referredTotalQ.get().n,
+    openToCalls: callsOpenQ.get().n,
     topInviters: topInvitersQ.all().map(r => ({ id: r.id, n: r.n, name: r.name, country: r.country, invited: r.invited })),
     ...presence(),
     merchPayments: merchPayments(),
@@ -304,7 +308,7 @@ async function register(req, res) {
 
   const row = { id: randomUUID(), ...profile, email, ip, created_at: Date.now(), referred_by: inviterOf(b.ref)?.id || null };
   persistWithEmail(() => {
-    insert.run(row.id, row.kind, row.name, row.company, row.email, row.country, row.also, row.city, row.building, row.website, row.handle, row.ip, row.created_at, row.referred_by);
+    insert.run(row.id, row.kind, row.name, row.company, row.email, row.country, row.also, row.city, row.building, row.website, row.handle, row.ip, row.created_at, row.referred_by, row.calls);
     EMAIL.enqueue("registered", row);
   });
   const pub = publicView({ ...row, n: numberQ.get(row.id).n });
@@ -323,10 +327,15 @@ function parseProfile(b) {
   if (website && !/^https?:\/\//i.test(website)) website = "https://" + website;
   try { if (website) { const u = new URL(website); if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".")) throw 0; website = u.href; } }
   catch { return { error: "That website doesn't look right." }; }
+  // enlace para agendar una llamada (Calendly, Cal.com, Google Calendar…), opcional
+  let calls = clean(b.calls, 200);
+  if (calls && !/^https?:\/\//i.test(calls)) calls = "https://" + calls;
+  try { if (calls) { const u = new URL(calls); if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".")) throw 0; calls = u.href; } }
+  catch { return { error: "That booking link doesn't look right." }; }
   if (name.length < 2) return { error: kind === "company" ? "Add the company name." : "Add your name." };
   if (!COUNTRIES.has(country)) return { error: "Pick a Latam country." };
   return { kind, name, company: kind === "person" ? clean(b.company, 80) : "", country, also: JSON.stringify(cleanAlso(b.also, country)), website,
-    city: clean(b.city, 60), building: clean(b.building, 140), handle: clean(b.handle, 30).replace(/^@/, "") };
+    city: clean(b.city, 60), building: clean(b.building, 140), handle: clean(b.handle, 30).replace(/^@/, ""), calls };
 }
 
 // ---------- miembros: enlace por correo, sesión, edición del perfil y foto/logo ----------
@@ -337,7 +346,7 @@ const insertToken = db.prepare("INSERT INTO member_tokens (hash,builder_id,kind,
 const tokenQ = db.prepare("SELECT * FROM member_tokens WHERE hash = ? AND kind = ? AND expires_at > ?");
 const dropToken = db.prepare("DELETE FROM member_tokens WHERE hash = ?");
 const pruneTokens = db.prepare("DELETE FROM member_tokens WHERE expires_at <= ?");
-const updateProfile = db.prepare(`UPDATE builders SET kind=?, name=?, company=?, country=?, also=?, city=?, building=?, website=?, handle=?, updated_at=? WHERE id=?`);
+const updateProfile = db.prepare(`UPDATE builders SET kind=?, name=?, company=?, country=?, also=?, city=?, building=?, website=?, handle=?, calls=?, updated_at=? WHERE id=?`);
 const setAvatar = db.prepare("UPDATE builders SET avatar = ?, updated_at = ? WHERE id = ?");
 setInterval(() => pruneTokens.run(Date.now()), HOUR).unref();
 
@@ -399,7 +408,7 @@ async function saveProfile(req, res, builder) {
   try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
   const p = parseProfile(b);
   if (p.error) return json(res, 400, { error: p.error });
-  updateProfile.run(p.kind, p.name, p.company, p.country, p.also, p.city, p.building, p.website, p.handle, Date.now(), builder.id);
+  updateProfile.run(p.kind, p.name, p.company, p.country, p.also, p.city, p.building, p.website, p.handle, p.calls, Date.now(), builder.id);
   scheduleBackup();
   const row = byId.get(builder.id);
   broadcast({ type: "update", builder: publicView(row) });
@@ -847,7 +856,7 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/directory" && req.method === "GET") {
       const u = new URL(req.url, "http://x").searchParams;
       const q = clean(u.get("q") || "", 60), country = clean(u.get("country") || "", 2).toUpperCase(), kind = clean(u.get("kind") || "", 10);
-      const f = { q, like: `%${q}%`, country, kind: ["person", "company"].includes(kind) ? kind : "" };
+      const f = { q, like: `%${q}%`, country, kind: ["person", "company"].includes(kind) ? kind : "", calls: u.get("calls") === "1" ? 1 : 0 };
       const rows = directoryQ.all({ ...f, offset: Math.max(0, Number(u.get("offset")) || 0) });
       return json(res, 200, { entries: rows.map(publicView), count: directoryCountQ.get(f).n });
     }
