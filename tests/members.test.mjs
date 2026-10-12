@@ -136,3 +136,13 @@ test("members sign in by email, switch to a company, post and close jobs, and re
   assert.equal(a.rows("SELECT COUNT(*) n FROM bounties")[0].n, 0, "a removed profile takes its bounties");
   assert.ok(!a.output().includes("fake-brevo-private"));
 });
+
+test("sign-in links beyond the daily per-email cap are not queued for later", async t => {
+  const a = await app(t);
+  const email = "busy@example.test";
+  assert.equal((await a.call("/api/register", { method: "POST", body: { name: "Busy", email, country: "CO", ft: a.ft() } })).status, 201);
+  for (let i = 0; i < 5; i++) assert.equal((await a.call("/api/signin/link", { method: "POST", body: { email, ft: a.ft() } })).status, 200);
+  // el cupo por destinatario (3 al día) cuenta todos sus correos: la confirmación de registro y 2 enlaces
+  const mails = a.rows("SELECT COUNT(*) n FROM email_outbox WHERE recipient = 'busy@example.test'")[0].n;
+  assert.equal(mails, 3, "nothing is queued beyond the daily cap");
+});

@@ -365,6 +365,9 @@ const me = r => ({ ...publicView(r), email: r.email, jobs: myJobsQ.all(r.id, Dat
   bounties: myBountiesQ.all({ id: r.id, now: Date.now() }).map(x => ({ ...bountyView(x, r), funding: fundingView(latestFund.get(x.id)) })),
   escrow: myFundsQ.all(r.id).map(fundingView) });
 
+const loginLoad = email => db.prepare(`SELECT
+  (SELECT COUNT(*) FROM email_attempts WHERE recipient = :email AND attempted_at > :since) +
+  (SELECT COUNT(*) FROM email_outbox WHERE recipient = :email AND status = 'pending') AS n`).get({ email, since: Date.now() - DAY }).n;
 async function requestLink(req, res) {
   const ip = clientIp(req);
   if (limited("link:" + ip, 5, 15 * 60_000)) return json(res, 429, { error: "Too many attempts, please wait a few minutes." });
@@ -378,7 +381,8 @@ async function requestLink(req, res) {
   if (!EMAIL.enabled) return json(res, 503, { error: "Email sign-in is not available yet. Please try again soon." });
   const builder = byEmail.get(email);
   // La respuesta es la misma exista o no el correo, para no revelar quién está en el directorio.
-  if (builder) {
+  // Si ese correo ya alcanzó su cupo diario (enviados + en cola), no se encola otro enlace que llegaría horas después.
+  if (builder && loginLoad(email) < (EMAIL_CONFIG?.maxPerRecipientPerDay ?? 3)) {
     const token = newToken(), now = Date.now();
     persistWithEmail(() => {
       insertToken.run(tokenHash(token), builder.id, "link", now, now + DAY);
