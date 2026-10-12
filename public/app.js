@@ -718,8 +718,9 @@ function renderDir() {
       <b>${esc(b.name)}</b>${b.kind === "person" && b.company ? `<span class="co">${esc(b.company)}</span>` : ""}
       ${b.building ? `<p>${esc(b.building)}</p>` : ""}
       ${b.also?.length ? `<span class="also-flags">Also in ${b.also.map(flag).join(" ")}</span>` : ""}
+      ${networkLines(b)}
       ${invitedLine(b)}
-      ${callLink(b)}
+      ${callLink(b) || brochureLink(b) ? `<div class="card-btns">${callLink(b)}${brochureLink(b)}</div>` : ""}
       <div class="card-foot"><span>${esc([b.city, cname(b.country)].filter(Boolean).join(", "))}</span>
         <span class="links">${site ? `<a href="${esc(site)}" target="_blank" rel="noopener nofollow">${esc(host(site))} ↗</a>` : ""}${b.handle ? `<a href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow">𝕏</a>` : ""}</span></div>
     </li>`;
@@ -833,6 +834,12 @@ form.addEventListener("submit", async e => {
 });
 
 const callLink = b => safeUrl(b.calls) ? `<a class="btn small primary call" href="${esc(safeUrl(b.calls))}" target="_blank" rel="noopener nofollow">📞 Book a call</a>` : "";
+const brochureUrl = u => /^\/media\/brochures\/[0-9a-f/-]+\.pdf$/.test(u || "") ? u : "";
+const brochureLink = b => brochureUrl(b.brochure) ? `<a class="btn small" href="${esc(brochureUrl(b.brochure))}" target="_blank" rel="noopener">📄 Brochure</a>` : "";
+// qué ofrece y a quién busca (agente de networking), en la tarjeta del directorio
+function networkLines(b) {
+  return (b.offer ? `<p class="net-line"><span>Offers</span>${esc(b.offer)}</p>` : "") + (b.seeking ? `<p class="net-line"><span>Wants to meet</span>${esc(b.seeking)}</p>` : "");
+}
 function invitedLine(b) {
   const parts = [];
   if (b.invitedBy) parts.push(`Invited by <span class="ib">${esc(b.invitedBy.name)}</span>`);
@@ -948,7 +955,7 @@ $("#jtype").addEventListener("change", e => { jobs.type = e.target.value; loadJo
 document.querySelectorAll('input[name="jwork"]').forEach(r => r.addEventListener("change", e => { jobs.workplace = e.target.value; loadJobs(); }));
 
 // ---------- miembros: enlace por correo, editar perfil, foto/logo y empleos ----------
-const dlg = $("#me"), pform = $("#pform"), jform = $("#jform"), signin = $("#signin");
+const dlg = $("#me"), pform = $("#pform"), jform = $("#jform"), nform = $("#nform"), signin = $("#signin");
 const member = { session: "", me: null, editing: true, uploads: true };
 try { member.session = localStorage.getItem("latamacc-session") || ""; } catch {}
 function saveSession(v) { member.session = v; try { v ? localStorage.setItem("latamacc-session", v) : localStorage.removeItem("latamacc-session"); } catch {} }
@@ -962,8 +969,9 @@ async function api(path, opts = {}) {
   return j;
 }
 function setTab(tab) {
-  $("#me-profile").hidden = tab !== "profile"; $("#me-jobs").hidden = tab !== "jobs"; $("#me-bounties").hidden = tab !== "bounties";
+  $("#me-profile").hidden = tab !== "profile"; $("#me-network").hidden = tab !== "network"; $("#me-jobs").hidden = tab !== "jobs"; $("#me-bounties").hidden = tab !== "bounties";
   dlg.querySelector(`input[name="metab"][value="${tab}"]`).checked = true;
+  if (tab === "network" && (member.me?.offer || member.me?.seeking) && !$("#matches").children.length) runMatches();
 }
 function showMe(tab) {
   const signed = !!(member.session && member.me);
@@ -1002,6 +1010,11 @@ function renderMe() {
   $("#photo-remove").hidden = !m.avatar;
   $("#photo-file").disabled = !member.uploads;
   $("#me-profile .photo").hidden = !member.uploads && !m.avatar;
+  nform.offer.value = m.offer || ""; nform.seeking.value = m.seeking || "";
+  const bu = brochureUrl(m.brochure);
+  $("#brochure-view").hidden = $("#brochure-remove").hidden = !bu; if (bu) $("#brochure-view").href = bu;
+  $("#brochure-state").textContent = bu ? "Your brochure is on your profile ✦" : "PDF up to 8 MB. Shown on your profile.";
+  $("#brochure-file").disabled = !member.uploads;
   pform.kind.value = m.kind;
   for (const k of ["name", "company", "country", "city", "building", "website", "handle", "calls"]) pform[k].value = m[k] || "";
   for (const b of pform.querySelectorAll(".also-grid input")) b.checked = m.also.includes(b.value);
@@ -1076,6 +1089,104 @@ jform.addEventListener("submit", async e => {
   } catch (err) { formMsg(jform, err.message); }
   finally { btn.disabled = false; }
 });
+// ---------- agente de networking ----------
+const CONCEPTS = { investors: "investors", customers: "clients & sales", talent: "talent", partners: "partners", ai: "AI", fintech: "fintech",
+  health: "health", education: "education", marketing: "marketing & content", mentors: "mentors", data: "data", legal: "legal", design: "design & product",
+  agro: "agro", energy: "energy & climate", government: "government", media: "media" };
+const words = list => list.map(t => esc(CONCEPTS[t] || t)).join(", ");
+function matchCard(m) {
+  const b = m.builder, site = safeUrl(b.website);
+  const why = [m.theyHave.length ? `They offer what you're looking for: <b>${words(m.theyHave)}</b>` : "",
+    m.theyWant.length ? `They want what you offer: <b>${words(m.theyWant)}</b>` : ""].filter(Boolean);
+  return `<li class="job match">
+    <div class="job-top">${avatar(b)}<div><b>${esc(b.name)}</b><span>${flag(b.country)} ${esc([b.city, cname(b.country)].filter(Boolean).join(", "))}${b.kind === "person" && b.company ? ` · ${esc(b.company)}` : ""}</span></div>
+      ${m.theyHave.length && m.theyWant.length ? `<span class="badge escrow">Mutual</span>` : ""}</div>
+    <p class="why">${why.join("<br />")}</p>
+    ${networkLines(b)}
+    <div class="card-actions">${callLink(b)}${brochureLink(b)}${site ? `<a class="btn small" href="${esc(site)}" target="_blank" rel="noopener nofollow">${esc(host(site))} ↗</a>` : ""}${b.handle ? `<a class="btn small" href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow">𝕏</a>` : ""}<button class="btn small" type="button" data-map="${esc(b.id)}" data-cc="${esc(b.country)}">On the map</button></div>
+  </li>`;
+}
+async function runMatches() {
+  const ul = $("#matches");
+  ul.innerHTML = `<li class="fine">The agent is scanning the community…</li>`;
+  try {
+    const j = await api("/api/me/matches");
+    ul.innerHTML = j.needs ? "" : j.matches.length
+      ? `<li class="form-title">Your best matches (${j.matches.length})</li>` + j.matches.map(matchCard).join("")
+      : `<li class="fine">No clear matches yet. Try more specific words (e.g. “seed investors”, “banks in Mexico”, “ML engineers”). The agent checks again every time someone new joins.</li>`;
+  } catch (err) { ul.innerHTML = `<li class="fine">${esc(err.message)}</li>`; }
+}
+nform.addEventListener("submit", async e => {
+  e.preventDefault();
+  const btn = nform.querySelector("button[type=submit]"), data = Object.fromEntries(new FormData(nform));
+  if (!data.offer.trim() && !data.seeking.trim()) return formMsg(nform, "Tell the agent what you offer or who you'd like to talk to.");
+  btn.disabled = true;
+  try { await api("/api/me/network", { method: "POST", json: data }); formMsg(nform, "Saved ✦ Here's who you should meet.", true); await runMatches(); }
+  catch (err) { formMsg(nform, err.message); }
+  finally { btn.disabled = false; }
+});
+$("#brochure-file").addEventListener("change", async e => {
+  const file = e.target.files[0]; e.target.value = "";
+  if (!file) return;
+  if (file.size > 8 * 1024 * 1024) return formMsg(nform, "The brochure must be 8 MB or less.");
+  $("#brochure-state").textContent = "Uploading…";
+  try { await api("/api/me/brochure", { method: "POST", body: file, headers: { "content-type": "application/pdf" } }); formMsg(nform, "Brochure uploaded ✦", true); }
+  catch (err) { renderMe(); formMsg(nform, err.message); }
+});
+$("#brochure-remove").addEventListener("click", async () => {
+  try { await api("/api/me/brochure", { method: "DELETE" }); formMsg(nform, "Brochure removed.", true); } catch (err) { formMsg(nform, err.message); }
+});
+$("#matches").addEventListener("click", e => {
+  const b = e.target.closest("[data-map]"); if (!b) return;
+  dlg.close(); showOnMap(b.dataset.map, b.dataset.cc);
+});
+
+// ---------- búsqueda global ----------
+const sdlg = $("#search"), sq = $("#sq");
+let searchSeq = 0, searchTimer;
+function openSearch(q = "") {
+  if (!sdlg.open) sdlg.showModal();
+  sq.value = q; sq.focus();
+  runSearch();
+}
+async function runSearch() {
+  const q = sq.value.trim(), seq = ++searchSeq, out = $("#s-results");
+  $("#s-hint").hidden = q.length >= 2;
+  if (q.length < 2) { out.innerHTML = ""; return; }
+  let j = { people: [], bounties: [], jobs: [] };
+  try { j = await fetch("/api/search?" + new URLSearchParams({ q })).then(r => r.json()); } catch {}
+  if (seq !== searchSeq) return;
+  const sec = (title, items, more) => items?.length ? `<div class="s-sec"><div class="feed-head mono">${title}${more ? ` <button class="linkish" type="button" data-more="${more}">See all</button>` : ""}</div><ul>${items.join("")}</ul></div>` : "";
+  const html = sec("People & companies", (j.people || []).map(b => `<li><button type="button" class="s-item" data-map="${esc(b.id)}" data-cc="${esc(b.country)}">${avatar(b)}<span><b>${esc(b.name)}</b><small>${flag(b.country)} ${esc([b.kind === "company" ? "Company" : b.company, b.building || b.offer].filter(Boolean).join(" · "))}</small></span></button></li>`), "directory")
+    + sec("Bounties", (j.bounties || []).map(x => `<li><button type="button" class="s-item" data-more="bounties"><span class="avatar co">◆</span><span><b>${esc(x.title)}</b><small>${esc(x.reward || "")} · ${esc(x.poster?.name || x.poster || "")}</small></span></button></li>`), "bounties")
+    + sec("Jobs", (j.jobs || []).map(x => `<li><button type="button" class="s-item" data-more="jobs"><span class="avatar co">✦</span><span><b>${esc(x.title)}</b><small>${esc([x.company, x.city].filter(Boolean).join(" · "))}</small></span></button></li>`), "jobs");
+  out.innerHTML = html || `<p class="fine">Nothing for “${esc(q)}” yet. <a href="#join" data-sclose>Join the directory</a> and be the first.</p>`;
+}
+sq.addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 180); });
+$("#sform").addEventListener("submit", e => { e.preventDefault(); runSearch(); });
+$("#search-close").addEventListener("click", () => sdlg.close());
+sdlg.addEventListener("click", e => {
+  if (e.target === sdlg || e.target.closest("[data-sclose]")) return sdlg.close();
+  const q = sq.value.trim();
+  const m = e.target.closest("[data-map]");
+  if (m) { sdlg.close(); return showOnMap(m.dataset.map, m.dataset.cc); }
+  const more = e.target.closest("[data-more]")?.dataset.more;
+  if (!more) return;
+  sdlg.close();
+  if (more === "directory") { dir.q = q; $("#q").value = q; loadDir(); }
+  if (more === "bounties") { bounties.q = q; $("#bq").value = q; loadBounties(); }
+  if (more === "jobs") { jobs.q = q; $("#jq").value = q; loadJobs(); }
+  document.getElementById(more).scrollIntoView({ behavior: "smooth" });
+});
+document.addEventListener("click", e => { if (e.target.closest("[data-search]")) openSearch(); });
+document.querySelectorAll("[data-search-form]").forEach(f => {
+  f.addEventListener("submit", e => { e.preventDefault(); openSearch(f.q.value.trim()); f.q.value = ""; });
+});
+document.addEventListener("keydown", e => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable;
+  if ((e.key === "k" && (e.metaKey || e.ctrlKey)) || (e.key === "/" && !typing && !dlg.open)) { e.preventDefault(); openSearch(); }
+});
+
 const bform = $("#bform");
 bform.addEventListener("submit", async e => {
   e.preventDefault();
@@ -1347,6 +1458,7 @@ addEventListener("resize", layout);
   S.countries.filter(c => !c.deco).sort((a, b) => a.en.localeCompare(b.en)).forEach(c => sel.add(new Option(`${flag(c.code)} ${c.en}`, c.code)));
 
   S.total = state.total; S.byCountry = state.byCountry; S.recent = state.recent; S.watching = state.watching || {}; S.growth = state.growth || []; S.kinds = state.kinds || {};
+  $("#net-n").textContent = (state.networkReady || 0).toLocaleString("en");
   S.referred = state.referred || 0; $("#calls-n").textContent = state.openToCalls ? state.openToCalls : ""; S.topInviters = state.topInviters || []; showInviter();
   buildAlso(form); buildAlso(pform);
   for (const sel2 of [pform.country, jform.country, $("#jcountry")])

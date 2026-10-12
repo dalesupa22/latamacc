@@ -29,7 +29,9 @@
       <a class="brand" href="#top"><img src="/assets/mark.png" alt="" /> Latam/acc</a>
       <div class="nav-r">
         <span class="live mono"><i></i><b id="nav-online">1</b> live</span>
+        <button class="navlink nav-search" type="button" data-search aria-label="Search LATAMACC">⌕ <span class="hide-sm">Search</span></button>
         <a class="hide-sm" href="#directory">Directory</a>
+        <a class="hide-sm" href="#network">Networking</a>
         <a class="hide-sm" href="#growth">Growth</a>
         <a class="hide-sm" href="#bounties">Bounties</a>
         <a class="hide-sm" href="#jobs">Jobs</a>
@@ -50,6 +52,10 @@
         <div><b id="online">1</b><span>watching now</span></div>
         <div><b id="countries-lit">0</b><span id="countries-of">/ 48 countries</span></div>
       </div>
+      <form class="hero-search" role="search" data-search-form>
+        <input type="search" name="q" placeholder="Search people, bounties, jobs…" aria-label="Search LATAMACC" autocomplete="off" />
+        <button class="btn small" type="submit">Search</button>
+      </form>
       <div class="cta">
         <a class="btn primary" href="#join">Join the directory</a>
         <a class="btn" href="#directory">Browse</a>
@@ -164,6 +170,24 @@
       <p id="dir-count" class="dir-count mono" aria-live="polite"></p>
       <ul id="dir" class="dir"></ul>
       <div class="dir-more"><button id="dir-more" class="btn" type="button" hidden>Show more</button></div>
+    </div>
+  </section>
+
+  <section id="network" class="network-sec">
+    <div class="wrap">
+      <p class="kicker mono reveal">Agentic networking</p>
+      <div class="jobs-head reveal">
+        <h2>Your networking agent.</h2>
+        <button class="btn primary" type="button" data-me="network">Run my agent</button>
+      </div>
+      <p class="lead reveal">Tell the agent what you offer and who you'd like to talk to, upload your brochure, and it scans the whole community to tell you who's worth meeting, and why.</p>
+      <ol class="net-steps reveal">
+        <li><b>1 · Your offer</b><span>What you sell, build or can help with.</span></li>
+        <li><b>2 · Who you want to meet</b><span>Investors, clients, talent, partners, mentors…</span></li>
+        <li><b>3 · Your brochure</b><span>A PDF so your matches see what you do.</span></li>
+        <li><b>4 · Your matches</b><span>The agent ranks members who fit, with the reason. Book a call in one click.</span></li>
+      </ol>
+      <p class="fine reveal"><b id="net-n">0</b> members already told the agent what they offer and who they want to meet.</p>
     </div>
   </section>
 
@@ -325,6 +349,15 @@
     </div>
   </footer>
 
+  <dialog id="search" class="me search-dlg" aria-label="Search LATAMACC">
+    <button class="cp-close" type="button" id="search-close" aria-label="Close">×</button>
+    <form class="search-row" role="search" id="sform">
+      <input id="sq" type="search" name="q" placeholder="Search people, companies, bounties, jobs…" aria-label="Search LATAMACC" autocomplete="off" />
+    </form>
+    <p class="fine" id="s-hint">Try “fintech”, “investors”, “Bogotá”, “agents” or someone's name.</p>
+    <div id="s-results" aria-live="polite"></div>
+  </dialog>
+
   <dialog id="me" class="me" aria-labelledby="me-title">
     <button class="cp-close" type="button" id="me-close" aria-label="Close">×</button>
     <div id="me-signin">
@@ -351,6 +384,7 @@
       </div>
       <div class="seg small me-tabs" role="tablist">
         <label><input type="radio" name="metab" value="profile" checked /> <span>Profile</span></label>
+        <label><input type="radio" name="metab" value="network" /> <span>Network</span></label>
         <label><input type="radio" name="metab" value="bounties" /> <span>Bounties</span></label>
         <label><input type="radio" name="metab" value="jobs" /> <span>Jobs</span></label>
       </div>
@@ -390,6 +424,28 @@
           <button class="btn primary big" type="submit">Save changes</button>
           <p class="form-msg" role="status"></p>
         </form>
+      </div>
+      <div id="me-network" hidden>
+        <form id="nform" class="form" novalidate>
+          <b class="form-title">Your networking agent</b>
+          <label><span>What do you offer? <span class="opt">(400 characters)</span></span><textarea name="offer" maxlength="400" rows="3" placeholder="AI agents for bank customer service, already live with 3 banks in Colombia"></textarea></label>
+          <label><span>Who would you like to talk to? <span class="opt">(400 characters)</span></span><textarea name="seeking" maxlength="400" rows="3" placeholder="Seed investors, heads of innovation at banks in Mexico, ML engineers"></textarea></label>
+          <div class="photo brochure">
+            <span class="avatar co">📄</span>
+            <div>
+              <b>Brochure</b>
+              <span class="fine" id="brochure-state">PDF up to 8 MB. Shown on your profile.</span>
+              <div class="photo-actions">
+                <label class="btn small">Upload PDF<input type="file" id="brochure-file" accept="application/pdf" hidden /></label>
+                <a class="btn small" id="brochure-view" target="_blank" rel="noopener" hidden>View</a>
+                <button class="btn small" type="button" id="brochure-remove" hidden>Remove</button>
+              </div>
+            </div>
+          </div>
+          <button class="btn primary big" type="submit">Save and find my matches</button>
+          <p class="form-msg" role="status"></p>
+        </form>
+        <ul id="matches" class="my-jobs matches"></ul>
       </div>
       <div id="me-bounties" hidden>
         <ul id="my-bounties" class="my-jobs"></ul>

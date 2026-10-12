@@ -9,6 +9,7 @@ import { WebSocketServer } from "ws";
 import { loadMoonpayConfig, MoonpayCommerce, USD_ID, validateCharge, verifyWebhook } from "./lib/moonpay.mjs";
 import { loadStorageConfig, S3Storage } from "./lib/storage.mjs";
 import { loadBrevoConfig, BrevoMailer, EmailOutbox } from "./lib/email.mjs";
+import { findMatches } from "./lib/matching.mjs";
 import { bountyQuote, parseRewardUsd, usdToMinor, solanaAddressOk, FEE_BPS, MIN_FEE_USD, MIN_REWARD_USD, MAX_REWARD_USD } from "./lib/payrails.mjs";
 
 const ROOT = new URL(".", import.meta.url).pathname;
@@ -37,8 +38,9 @@ db.exec(`CREATE TABLE IF NOT EXISTS builders (
 const cols = new Set(db.prepare("PRAGMA table_info(builders)").all().map(c => c.name));
 // also: otros países donde también construye (nómadas), como arreglo JSON de códigos.
 // avatar: clave en S3 de la foto o logo; updated_at: última edición del perfil.
+// offer/seeking: qué ofrece y qué o a quién busca (agente de networking); brochure: clave en S3 de su PDF.
 for (const [col, def] of [["kind", "TEXT NOT NULL DEFAULT 'person'"], ["company", "TEXT"], ["website", "TEXT"], ["also", "TEXT NOT NULL DEFAULT '[]'"],
-  ["avatar", "TEXT"], ["updated_at", "INTEGER"], ["referred_by", "TEXT"], ["calls", "TEXT"]])
+  ["avatar", "TEXT"], ["updated_at", "INTEGER"], ["referred_by", "TEXT"], ["calls", "TEXT"], ["offer", "TEXT"], ["seeking", "TEXT"], ["brochure", "TEXT"]])
   if (!cols.has(col)) db.exec(`ALTER TABLE builders ADD COLUMN ${col} ${def}`);
 // Empleos publicados por miembros; vencen a los 60 días o cuando su autor los cierra.
 db.exec(`CREATE TABLE IF NOT EXISTS jobs (
@@ -78,13 +80,13 @@ const insert = db.prepare(`INSERT INTO builders (id,kind,name,company,email,coun
 const directoryQ = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders
   WHERE (:country = '' OR country = :country OR EXISTS (SELECT 1 FROM json_each(builders.also) j WHERE j.value = :country))
     AND (:kind = '' OR kind = :kind)
-    AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like)
+    AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like OR offer LIKE :like OR seeking LIKE :like)
     AND (:calls = 0 OR COALESCE(calls, '') <> '')
   ORDER BY created_at DESC LIMIT 60 OFFSET :offset`);
 const directoryCountQ = db.prepare(`SELECT COUNT(*) n FROM builders
   WHERE (:country = '' OR country = :country OR EXISTS (SELECT 1 FROM json_each(builders.also) j WHERE j.value = :country))
     AND (:kind = '' OR kind = :kind)
-    AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like)
+    AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like OR offer LIKE :like OR seeking LIKE :like)
     AND (:calls = 0 OR COALESCE(calls, '') <> '')`);
 const byEmail = db.prepare(`SELECT rowid AS n, * FROM builders WHERE email = ?`);
 const byId = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders WHERE id = ?`);
@@ -210,6 +212,7 @@ function publicView(r) {
   return { id: r.id, n: r.n, kind: r.kind || "person", name: r.name, company: r.company || "", country: r.country, city: r.city || "",
     also: alsoOf(r), building: r.building || "", website: r.website || "", handle: r.handle || "", ts: r.created_at,
     avatar: r.avatar ? `/media/${r.avatar}` : "", hiring: r.hiring || 0, calls: r.calls || "",
+    offer: r.offer || "", seeking: r.seeking || "", brochure: r.brochure ? `/media/${r.brochure}` : "",
     ref: refOf(r.id), invitedBy: by ? { id: by.id, name: by.name, n: by.n } : null, invited: invitedCountQ.get(r.id).n };
 }
 // ---------- referidos: cada miembro invita con latamacc.si/?ref=<8 primeros caracteres de su id> ----------
@@ -221,6 +224,7 @@ const byRefQ = db.prepare("SELECT rowid AS n, id, name, kind, country FROM build
 const topInvitersQ = db.prepare(`SELECT b.rowid AS n, b.id, b.name, b.country, COUNT(*) invited FROM builders r JOIN builders b ON b.id = r.referred_by
   GROUP BY b.id ORDER BY invited DESC, MIN(r.created_at) LIMIT 5`);
 const callsOpenQ = db.prepare("SELECT COUNT(*) n FROM builders WHERE COALESCE(calls, '') <> ''");
+const networkReadyQ = db.prepare("SELECT COUNT(*) n FROM builders WHERE COALESCE(offer, '') <> '' OR COALESCE(seeking, '') <> ''");
 const referredTotalQ = db.prepare("SELECT COUNT(*) n FROM builders WHERE referred_by IS NOT NULL");
 const inviterOf = code => REF_RE.test(String(code || "")) ? byRefQ.get(String(code)) : null;
 function alsoOf(r) { try { const a = JSON.parse(r.also || "[]"); return Array.isArray(a) ? a.filter(c => COUNTRIES.has(c)) : []; } catch { return []; } }
@@ -243,6 +247,7 @@ function state() {
     kinds: Object.fromEntries(kindsQ.all().map(r => [r.kind || "person", r.n])),
     referred: referredTotalQ.get().n,
     openToCalls: callsOpenQ.get().n,
+    networkReady: networkReadyQ.get().n,
     topInviters: topInvitersQ.all().map(r => ({ id: r.id, n: r.n, name: r.name, country: r.country, invited: r.invited })),
     ...presence(),
     merchPayments: merchPayments(),
@@ -452,19 +457,84 @@ async function removeAvatar(res, builder) {
   broadcast({ type: "update", builder: publicView(row) });
   json(res, 200, { ok: true, me: me(row) });
 }
-const MEDIA_RE = /^\/media\/(avatars\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(png|jpg|webp))$/;
-// Solo se sirven imágenes en uso: una foto reemplazada o quitada deja de verse aunque S3 no permita borrarla.
-const avatarInUse = db.prepare("SELECT 1 FROM builders WHERE avatar = ?");
+const MEDIA_RE = /^\/media\/((?:avatars\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(png|jpg|webp))|(?:brochures\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(pdf)))$/;
+// Solo se sirven archivos en uso: una foto o brochure reemplazado o quitado deja de verse aunque S3 no permita borrarlo.
+const mediaInUse = db.prepare("SELECT 1 FROM builders WHERE avatar = :key OR brochure = :key");
+const MEDIA_TYPES = { ...IMAGE_TYPES, pdf: "application/pdf" };
 async function serveMedia(req, res, key, ext) {
-  if (!STORAGE || !avatarInUse.get(key)) return json(res, 404, { error: "not found" });
+  if (!STORAGE || !mediaInUse.get({ key })) return json(res, 404, { error: "not found" });
   let obj;
   try { obj = await STORAGE.get(key); }
   catch (e) { return json(res, e.code === "NoSuchKey" || e.statusCode === 404 || e.statusCode === 403 ? 404 : 502, { error: "not found" }); }
   // caché corta: al quitar una foto, Cloudflare deja de servirla en una hora como máximo
-  res.writeHead(200, { "content-type": IMAGE_TYPES[ext], "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff",
+  res.writeHead(200, { "content-type": MEDIA_TYPES[ext], "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff",
+    ...(ext === "pdf" ? { "content-disposition": "inline; filename=\"brochure.pdf\"", "content-security-policy": "sandbox" } : {}),
     ...(obj.ContentLength ? { "content-length": obj.ContentLength } : {}) });
   if (req.method === "HEAD") { obj.Body?.destroy?.(); return res.end(); }
   obj.Body.on("error", () => res.destroy()).pipe(res);
+}
+
+// ---------- agente de networking: qué ofrezco, qué busco, brochure y cruces ----------
+const setNetwork = db.prepare("UPDATE builders SET offer = ?, seeking = ?, updated_at = ? WHERE id = ?");
+const setBrochure = db.prepare("UPDATE builders SET brochure = ?, updated_at = ? WHERE id = ?");
+const networkPoolQ = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders`);
+async function saveNetwork(req, res, builder) {
+  if (limited("edit:" + builder.id, 30)) return json(res, 429, { error: "Too many changes, please wait a minute." });
+  let b;
+  try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
+  const offer = clean(b.offer, 400), seeking = clean(b.seeking, 400);
+  setNetwork.run(offer, seeking, Date.now(), builder.id);
+  scheduleBackup();
+  const row = byId.get(builder.id);
+  broadcast({ type: "update", builder: publicView(row) });
+  json(res, 200, { ok: true, me: me(row) });
+}
+// Brochure en PDF de hasta 8 MB, guardado en S3 privado y servido por /media.
+async function uploadBrochure(req, res, builder) {
+  if (!STORAGE) return json(res, 503, { error: "Uploads are not available right now." });
+  if (limited("brochure:" + builder.id, 10)) return json(res, 429, { error: "Too many uploads, please wait a minute." });
+  let buf;
+  try { buf = await readRawBody(req, 8 * 1024 * 1024); } catch { return json(res, 413, { error: "The brochure must be 8 MB or less." }); }
+  if (buf.length < 5 || buf.toString("latin1", 0, 5) !== "%PDF-") return json(res, 400, { error: "Upload your brochure as a PDF." });
+  const key = `brochures/${builder.id}/${randomUUID()}.pdf`;
+  try { await STORAGE.put(key, buf, { contentType: "application/pdf" }); }
+  catch { return json(res, 502, { error: "Could not save the brochure. Please try again." }); }
+  setBrochure.run(key, Date.now(), builder.id);
+  scheduleBackup();
+  if (builder.brochure) STORAGE.remove(builder.brochure).catch(() => {});
+  const row = byId.get(builder.id);
+  broadcast({ type: "update", builder: publicView(row) });
+  json(res, 200, { ok: true, me: me(row) });
+}
+function removeBrochure(res, builder) {
+  setBrochure.run(null, Date.now(), builder.id);
+  scheduleBackup();
+  if (builder.brochure) STORAGE?.remove(builder.brochure).catch(() => {});
+  const row = byId.get(builder.id);
+  broadcast({ type: "update", builder: publicView(row) });
+  json(res, 200, { ok: true, me: me(row) });
+}
+function networkMatches(res, builder) {
+  if (limited("match:" + builder.id, 30)) return json(res, 429, { error: "Too many requests, please wait a minute." });
+  if (!builder.seeking && !builder.offer) return json(res, 200, { ok: true, matches: [], needs: true });
+  const pool = networkPoolQ.all(), byIdMap = new Map(pool.map(r => [r.id, r]));
+  const matches = findMatches(builder, pool).map(m => ({ ...m, builder: publicView(byIdMap.get(m.id)) }));
+  json(res, 200, { ok: true, matches });
+}
+
+// ---------- búsqueda global: personas y empresas, bounties y empleos ----------
+const searchPeopleQ = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders
+  WHERE name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like OR offer LIKE :like OR seeking LIKE :like OR handle LIKE :like
+  ORDER BY (name LIKE :like OR company LIKE :like) DESC, created_at DESC LIMIT 8`);
+function search(res, q) {
+  q = clean(q, 60);
+  if (q.length < 2) return json(res, 200, { people: [], bounties: [], jobs: [] });
+  const like = `%${q.replace(/[%_]/g, "")}%`, now = Date.now();
+  json(res, 200, {
+    people: searchPeopleQ.all({ like }).map(publicView),
+    bounties: bountiesQ.all({ q, like, category: "", now, offset: 0 }).slice(0, 4).map(x => bountyView(x)),
+    jobs: jobsQ.all({ q, like, country: "", workplace: "", type: "", now, offset: 0 }).slice(0, 4).map(j => jobView(j)),
+  });
 }
 
 const deleteBuilder = db.prepare("DELETE FROM builders WHERE id = ?");
@@ -475,6 +545,7 @@ function removeProfile(res, builder) {
     return json(res, 409, { error: "You have bounty money in escrow. Pick a winner or close the bounty and wait for the refund before removing your profile." });
   persistWithEmail(() => { deleteJobsOf.run(builder.id); deleteBountiesOf.run(builder.id); deleteTokensOf.run(builder.id); deleteBuilder.run(builder.id); });
   if (builder.avatar) STORAGE?.remove(builder.avatar).catch(() => {});
+  if (builder.brochure) STORAGE?.remove(builder.brochure).catch(() => {});
   scheduleBackup();
   broadcast({ type: "remove", id: builder.id, total: totalQ.get().n });
   json(res, 200, { ok: true });
@@ -865,6 +936,10 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { entries: rows.map(publicView), count: directoryCountQ.get(f).n });
     }
     if (pathname === "/api/register" && req.method === "POST") return await register(req, res);
+    if (pathname === "/api/search" && req.method === "GET") {
+      if (limited("search:" + clientIp(req), 60)) return json(res, 429, { error: "Too many searches, please wait a minute." });
+      return search(res, new URL(req.url, "http://x").searchParams.get("q") || "");
+    }
     if (pathname === "/api/jobs" && req.method === "GET") {
       const u = new URL(req.url, "http://x").searchParams;
       const q = clean(u.get("q") || "", 60), country = clean(u.get("country") || "", 2).toUpperCase();
@@ -893,6 +968,10 @@ const server = createServer(async (req, res) => {
       if (pathname === "/api/me" && req.method === "DELETE") return removeProfile(res, builder);
       if (pathname === "/api/me/avatar" && req.method === "POST") return await uploadAvatar(req, res, builder);
       if (pathname === "/api/me/avatar" && req.method === "DELETE") return removeAvatar(res, builder);
+      if (pathname === "/api/me/network" && req.method === "POST") return await saveNetwork(req, res, builder);
+      if (pathname === "/api/me/matches" && req.method === "GET") return networkMatches(res, builder);
+      if (pathname === "/api/me/brochure" && req.method === "POST") return await uploadBrochure(req, res, builder);
+      if (pathname === "/api/me/brochure" && req.method === "DELETE") return removeBrochure(res, builder);
       if (pathname === "/api/me/signout" && req.method === "POST") {
         dropToken.run(tokenHash(String(req.headers.authorization).slice(7)));
         return json(res, 200, { ok: true });
@@ -914,7 +993,7 @@ const server = createServer(async (req, res) => {
     if (pathname === "/api/moonpay/webhook" && req.method === "POST") return await moonpayWebhook(req, res);
     if (pathname.startsWith("/api/")) return json(res, 404, { error: "not found" });
     const media = MEDIA_RE.exec(pathname);
-    if (media && (req.method === "GET" || req.method === "HEAD")) return await serveMedia(req, res, media[1], media[2]);
+    if (media && (req.method === "GET" || req.method === "HEAD")) return await serveMedia(req, res, media[1], media[2] || media[3]);
     return await serveStatic(req, res);
   } catch (e) {
     console.error(e);
