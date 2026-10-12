@@ -386,7 +386,9 @@ button.badge { background: none; font: inherit; font-size: 11px; cursor: pointer
 .job .card-foot { align-items: center; }
 .job .btn.primary { color: #1a1204; }
 .me { margin: auto; width: min(620px, calc(100vw - 24px)); max-height: calc(100svh - 32px); background: #0b0907; color: var(--fg);
-  border: 1px solid rgba(240,200,110,.45); border-radius: 18px; padding: 28px; position: relative; box-shadow: 0 30px 120px rgba(0,0,0,.8); }
+  border: 1px solid rgba(240,200,110,.45); border-radius: 18px; padding: 28px; box-shadow: 0 30px 120px rgba(0,0,0,.8);
+  /* fixed (como todo modal): abierto desde abajo de la página se ve en pantalla, sin subir a buscarlo */
+  position: fixed; inset: 0; overflow-y: auto; overscroll-behavior: contain; }
 .me::backdrop { background: rgba(0,0,0,.7); backdrop-filter: blur(4px); }
 .me h3 { font-size: 24px; letter-spacing: -.02em; }
 .me-lead { color: #cfc9c1; margin-top: 8px; }

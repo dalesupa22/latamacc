@@ -968,7 +968,7 @@ function showMe(tab) {
   if (signed && tab) setTab(tab);
 }
 async function openMe(tab = "profile") {
-  if (!dlg.open) dlg.showModal();
+  if (!dlg.open) { dlg.showModal(); dlg.scrollTop = 0; }
   if (member.session && !member.me) { try { await api("/api/me"); } catch {} }
   showMe(tab);
   if (!member.me) {
@@ -1010,7 +1010,11 @@ function renderMe() {
     ${f.signature ? `<a class="btn small" href="https://solscan.io/tx/${encodeURIComponent(f.signature)}" target="_blank" rel="noopener">Transaction ↗</a>` : ""}</li>`).join("") : "";
   $("#my-jobs").innerHTML = m.jobs.length ? `<li class="form-title">Your open jobs</li>` + m.jobs.map(j => jobCard(j, true)).join("") : "";
 }
-function formMsg(f, text, ok = false) { const m = f.querySelector(".form-msg"); m.className = `form-msg ${ok ? "ok" : "err"}`; m.textContent = text; }
+function formMsg(f, text, ok = false) {
+  const m = f.querySelector(".form-msg"); m.className = `form-msg ${ok ? "ok" : "err"}`; m.textContent = text;
+  // en el celular el teclado tapa el aviso: lo traemos a la vista
+  m.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
 signin.addEventListener("submit", async e => {
   e.preventDefault();
   const btn = signin.querySelector("button[type=submit]"), data = Object.fromEntries(new FormData(signin));
