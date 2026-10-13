@@ -720,7 +720,7 @@ function renderDir() {
       ${b.also?.length ? `<span class="also-flags">Also in ${b.also.map(flag).join(" ")}</span>` : ""}
       ${networkLines(b)}
       ${invitedLine(b)}
-      ${callLink(b) || brochureLink(b) ? `<div class="card-btns">${callLink(b)}${brochureLink(b)}</div>` : ""}
+      <div class="card-btns">${dmButton(b)}${callLink(b)}${brochureLink(b)}</div>
       <div class="card-foot"><span>${esc([b.city, cname(b.country)].filter(Boolean).join(", "))}</span>
         <span class="links">${site ? `<a href="${esc(site)}" target="_blank" rel="noopener nofollow">${esc(host(site))} ↗</a>` : ""}${b.handle ? `<a href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow">𝕏</a>` : ""}</span></div>
     </li>`;
@@ -834,6 +834,7 @@ form.addEventListener("submit", async e => {
 });
 
 const callLink = b => safeUrl(b.calls) ? `<a class="btn small primary call" href="${esc(safeUrl(b.calls))}" target="_blank" rel="noopener nofollow">📞 Book a call</a>` : "";
+const dmButton = b => member.me?.id === b.id ? "" : `<button class="btn small" type="button" data-dm="${esc(b.id)}">✉ Message</button>`;
 const brochureUrl = u => /^\/media\/brochures\/[0-9a-f/-]+\.pdf$/.test(u || "") ? u : "";
 const brochureLink = b => brochureUrl(b.brochure) ? `<a class="btn small" href="${esc(brochureUrl(b.brochure))}" target="_blank" rel="noopener">📄 Brochure</a>` : "";
 // qué ofrece y a quién busca (agente de networking), en la tarjeta del directorio
@@ -969,7 +970,8 @@ async function api(path, opts = {}) {
   return j;
 }
 function setTab(tab) {
-  $("#me-profile").hidden = tab !== "profile"; $("#me-network").hidden = tab !== "network"; $("#me-jobs").hidden = tab !== "jobs"; $("#me-bounties").hidden = tab !== "bounties";
+  $("#me-profile").hidden = tab !== "profile"; $("#me-network").hidden = tab !== "network"; $("#me-messages").hidden = tab !== "messages";
+  if (tab === "messages" && member.me) openInbox(); $("#me-jobs").hidden = tab !== "jobs"; $("#me-bounties").hidden = tab !== "bounties";
   dlg.querySelector(`input[name="metab"][value="${tab}"]`).checked = true;
   if (tab === "network" && (member.me?.offer || member.me?.seeking) && !$("#matches").children.length) runMatches();
 }
@@ -985,7 +987,8 @@ async function openMe(tab = "profile") {
   if (!member.me) {
     const m = signin.querySelector(".form-msg");
     m.className = "form-msg"; m.textContent = tab === "jobs" ? "Jobs are posted by directory members. Sign in to post one."
-      : tab === "bounties" ? "Bounties are posted by directory members. Sign in to post one." : "";
+      : tab === "bounties" ? "Bounties are posted by directory members. Sign in to post one."
+      : tab === "messages" ? "Messages are for directory members. Sign in with the email you joined with to send one." : "";
     if (!member.editing) { m.className = "form-msg err"; m.textContent = "Email sign-in opens very soon. Please check back later."; }
   }
 }
@@ -1010,6 +1013,7 @@ function renderMe() {
   $("#photo-remove").hidden = !m.avatar;
   $("#photo-file").disabled = !member.uploads;
   $("#me-profile .photo").hidden = !member.uploads && !m.avatar;
+  setUnread(m.unread || 0);
   nform.offer.value = m.offer || ""; nform.seeking.value = m.seeking || "";
   const bu = brochureUrl(m.brochure);
   $("#brochure-view").hidden = $("#brochure-remove").hidden = !bu; if (bu) $("#brochure-view").href = bu;
@@ -1103,7 +1107,7 @@ function matchCard(m) {
       ${m.theyHave.length && m.theyWant.length ? `<span class="badge escrow">Mutual</span>` : ""}</div>
     <p class="why">${why.join("<br />")}</p>
     ${networkLines(b)}
-    <div class="card-actions">${callLink(b)}${brochureLink(b)}${site ? `<a class="btn small" href="${esc(site)}" target="_blank" rel="noopener nofollow">${esc(host(site))} ↗</a>` : ""}${b.handle ? `<a class="btn small" href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow">𝕏</a>` : ""}<button class="btn small" type="button" data-map="${esc(b.id)}" data-cc="${esc(b.country)}">On the map</button></div>
+    <div class="card-actions">${dmButton(b)}${callLink(b)}${brochureLink(b)}${site ? `<a class="btn small" href="${esc(site)}" target="_blank" rel="noopener nofollow">${esc(host(site))} ↗</a>` : ""}${b.handle ? `<a class="btn small" href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow">𝕏</a>` : ""}<button class="btn small" type="button" data-map="${esc(b.id)}" data-cc="${esc(b.country)}">On the map</button></div>
   </li>`;
 }
 async function runMatches() {
@@ -1140,6 +1144,92 @@ $("#matches").addEventListener("click", e => {
   const b = e.target.closest("[data-map]"); if (!b) return;
   dlg.close(); showOnMap(b.dataset.map, b.dataset.cc);
 });
+
+// ---------- mensajes directos ----------
+const dms = { with: null, timer: 0 };
+function setUnread(n) {
+  if (member.me) member.me.unread = n;
+  document.querySelectorAll(".unread-n").forEach(el => { el.textContent = n ? String(n) : ""; });
+  $(".nav-inbox").hidden = !member.me;
+}
+const dmTime = ts => new Date(ts).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+async function openInbox() {
+  dms.with = null; $("#inbox-view").hidden = false; $("#thread-view").hidden = true;
+  const ul = $("#inbox");
+  try {
+    const j = await api("/api/me/inbox"); setUnread(j.unread);
+    ul.innerHTML = j.threads.length ? j.threads.map(t => `<li><button type="button" class="s-item ${t.unread ? "unread" : ""}" data-thread="${esc(t.with.id)}">${avatar(t.with)}<span><b>${esc(t.with.name)}${t.unread ? ` <i class="dot-n">${t.unread}</i>` : ""}</b><small>${t.mine ? "You: " : ""}${esc(t.last)}</small></span><small class="mono">${esc(ago(t.ts))}</small></button></li>`).join("")
+      : `<li class="fine">No messages yet. Find someone in the <a href="#directory" data-close>directory</a> or in your <button class="linkish" type="button" data-gotab="network">networking matches</button> and tap ✉ Message.</li>`;
+  } catch (err) { ul.innerHTML = `<li class="fine">${esc(err.message)}</li>`; }
+}
+function renderThread(j) {
+  dms.with = j.with;
+  $("#inbox-view").hidden = true; $("#thread-view").hidden = false;
+  $("#thread-who").innerHTML = `${avatar(j.with)}<b>${esc(j.with.name)}</b>`;
+  $("#thread-block").textContent = j.blocked ? "Unblock" : "Block"; $("#thread-block").dataset.blocked = j.blocked ? "1" : "";
+  const ol = $("#thread-msgs");
+  ol.innerHTML = j.messages.length ? j.messages.map(m => `<li class="${m.mine ? "mine" : ""}"><p>${esc(m.body)}</p><small>${esc(dmTime(m.ts))}</small></li>`).join("")
+    : `<li class="fine">Say hi to ${esc(j.with.name)}: who you are, why you'd like to talk and what you propose.</li>`;
+  ol.scrollTop = ol.scrollHeight;
+  setUnread(j.unread);
+}
+async function openThread(id) {
+  try { renderThread(await api(`/api/me/messages/${id}`)); } catch (err) { toast(err.message); }
+}
+async function messageMember(id) {
+  if (!member.session) { await openMe("messages"); return; }
+  await openMe("messages");
+  if (member.me) openThread(id);
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-dm]");
+  if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  if (sdlg.open) sdlg.close();
+  messageMember(b.dataset.dm);
+}, true);
+$("#inbox").addEventListener("click", e => {
+  const t = e.target.closest("[data-thread]"); if (t) return openThread(t.dataset.thread);
+  if (e.target.closest("[data-gotab]")) setTab("network");
+});
+$("#thread-back").addEventListener("click", openInbox);
+$("#thread-block").addEventListener("click", async () => {
+  if (!dms.with) return;
+  const on = !$("#thread-block").dataset.blocked;
+  if (on && !confirm(`Block ${dms.with.name}? They won't be able to message you.`)) return;
+  try { await api(`/api/me/messages/${dms.with.id}/${on ? "block" : "unblock"}`, { method: "POST" }); openThread(dms.with.id); toast(on ? "Blocked." : "Unblocked."); }
+  catch (err) { toast(err.message); }
+});
+const dmform = $("#dmform");
+dmform.addEventListener("submit", async e => {
+  e.preventDefault();
+  const body = dmform.body.value.trim();
+  if (!body || !dms.with) return;
+  const btn = dmform.querySelector("button[type=submit]"); btn.disabled = true;
+  try { renderThread(await api(`/api/me/messages/${dms.with.id}`, { method: "POST", json: { body } })); dmform.body.value = ""; dmform.querySelector(".form-msg").textContent = ""; }
+  catch (err) { formMsg(dmform, err.message); }
+  finally { btn.disabled = false; }
+});
+dmform.body.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); dmform.requestSubmit(); } });
+// revisa mensajes nuevos cada 30 s mientras haya sesión; con la conversación abierta, la refresca
+async function pollUnread() {
+  if (!member.session || document.hidden) return;
+  try {
+    const r = await fetch("/api/me/unread", { headers: { authorization: `Bearer ${member.session}` } });
+    if (!r.ok) return;
+    const { unread } = await r.json();
+    const prev = member.me?.unread || 0;
+    if (!member.me) { try { await api("/api/me"); } catch { return; } }
+    setUnread(unread);
+    if (unread > prev) {
+      if (dlg.open && dms.with && !$("#me-messages").hidden) openThread(dms.with.id);
+      else if (dlg.open && !$("#me-messages").hidden) openInbox();
+      else toast(`✉ You have ${unread} new message${unread > 1 ? "s" : ""}. Open Edit profile → Messages.`);
+    }
+  } catch {}
+}
+setInterval(pollUnread, 30_000);
+setTimeout(pollUnread, 1500);
 
 // ---------- búsqueda global ----------
 const sdlg = $("#search"), sq = $("#sq");

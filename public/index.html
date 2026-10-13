@@ -35,6 +35,7 @@
         <a class="hide-sm" href="#growth">Growth</a>
         <a class="hide-sm" href="#bounties">Bounties</a>
         <a class="hide-sm" href="#jobs">Jobs</a>
+        <button class="navlink nav-inbox" type="button" data-me="messages" hidden aria-label="Messages">✉ <b class="unread-n"></b></button>
         <button class="navlink hide-sm" type="button" data-me="profile">Edit profile</button>
         <a class="pill" href="#join">Join the directory</a>
       </div>
@@ -339,7 +340,7 @@
     <a href="#directory" data-tab="directory"><span>☰</span>Directory</a>
     <a href="#join" data-tab="join" class="tab-join"><span>✦</span>Join</a>
     <a href="#bounties" data-tab="bounties"><span>◆</span>Bounties</a>
-    <button type="button" data-me="profile"><span>◉</span>Profile</button>
+    <button type="button" data-me="profile"><span>◉<b class="unread-n tab-badge"></b></span>Profile</button>
   </div>
 
   <footer class="foot">
@@ -385,6 +386,7 @@
       <div class="seg small me-tabs" role="tablist">
         <label><input type="radio" name="metab" value="profile" checked /> <span>Profile</span></label>
         <label><input type="radio" name="metab" value="network" /> <span>Network</span></label>
+        <label><input type="radio" name="metab" value="messages" /> <span>Messages <b class="unread-n"></b></span></label>
         <label><input type="radio" name="metab" value="bounties" /> <span>Bounties</span></label>
         <label><input type="radio" name="metab" value="jobs" /> <span>Jobs</span></label>
       </div>
@@ -446,6 +448,25 @@
           <p class="form-msg" role="status"></p>
         </form>
         <ul id="matches" class="my-jobs matches"></ul>
+      </div>
+      <div id="me-messages" hidden>
+        <div id="inbox-view">
+          <b class="form-title">Messages</b>
+          <ul id="inbox" class="inbox"></ul>
+        </div>
+        <div id="thread-view" hidden>
+          <div class="thread-head">
+            <button class="btn small" type="button" id="thread-back">←</button>
+            <span id="thread-who"></span>
+            <button class="linkish danger" type="button" id="thread-block">Block</button>
+          </div>
+          <ol id="thread-msgs" class="thread-msgs"></ol>
+          <form id="dmform" class="form dmform" novalidate>
+            <textarea name="body" maxlength="1000" rows="2" placeholder="Write a message…" required></textarea>
+            <button class="btn primary" type="submit">Send</button>
+            <p class="form-msg" role="status"></p>
+          </form>
+        </div>
       </div>
       <div id="me-bounties" hidden>
         <ul id="my-bounties" class="my-jobs"></ul>

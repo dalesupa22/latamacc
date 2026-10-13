@@ -492,3 +492,32 @@ html:has(.me[open]) { overflow: hidden; }
 .match .card-actions a.btn.primary { color: #1a1204; }
 .brochure .avatar { font-size: 16px; }
 @media (max-width: 700px) { .hero-search { max-width: none; } }
+
+/* mensajes directos */
+.unread-n:empty { display: none; }
+.unread-n { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; font: 700 11px Inter, sans-serif;
+  color: #1a1204; background: linear-gradient(135deg, #fff1c2, #e9c063 45%, #b8862b); vertical-align: middle; }
+.nav-inbox { color: var(--fire2); font-size: 16px; }
+.tabbar .tab-badge { position: absolute; margin: -6px 0 0 -4px; }
+.tabbar span:has(.tab-badge) { position: relative; }
+.inbox { list-style: none; display: grid; gap: 4px; margin-top: 12px; }
+.inbox .s-item > span:nth-child(2) { flex: 1; }
+.inbox .s-item > small { color: var(--mute); font-size: 11px; flex: none; }
+.inbox .s-item.unread b { color: var(--fire2); }
+.dot-n { font-style: normal; font-size: 11px; color: #1a1204; background: var(--fire2); border-radius: 999px; padding: 0 6px; margin-left: 4px; }
+.thread-head { display: flex; align-items: center; gap: 12px; }
+.thread-head #thread-who { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.thread-head #thread-block { font-size: 12px; }
+.thread-msgs { list-style: none; display: flex; flex-direction: column; gap: 8px; margin-top: 14px; max-height: min(52vh, 460px); overflow-y: auto;
+  padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: #070605; }
+.thread-msgs li { max-width: 82%; align-self: flex-start; background: var(--card); border: 1px solid #2c2722; border-radius: 14px 14px 14px 4px; padding: 8px 12px; }
+.thread-msgs li.mine { align-self: flex-end; background: rgba(240,200,110,.14); border-color: rgba(240,200,110,.35); border-radius: 14px 14px 4px 14px; }
+.thread-msgs li.fine { max-width: none; align-self: stretch; background: none; border: 0; color: var(--mute); }
+.thread-msgs p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+.thread-msgs small { display: block; color: var(--mute); font-size: 10px; margin-top: 2px; }
+.dmform { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin-top: 10px !important; }
+.dmform .form-msg { grid-column: 1 / -1; }
+.inbox .s-item > span:nth-child(2) { display: grid; min-width: 0; }
+.me-tabs { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.me-tabs::-webkit-scrollbar { display: none; }
+@media (max-width: 420px) { .me-tabs label span { padding-left: 10px; padding-right: 10px; } }

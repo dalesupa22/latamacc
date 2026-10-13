@@ -75,6 +75,12 @@ db.exec(`CREATE TABLE IF NOT EXISTS bounty_funds (
 db.exec(`CREATE TABLE IF NOT EXISTS member_tokens (
   hash TEXT PRIMARY KEY, builder_id TEXT NOT NULL, kind TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
   CREATE INDEX IF NOT EXISTS member_tokens_builder ON member_tokens(builder_id);`);
+// Mensajes directos entre miembros. dm_blocks: a quién bloqueó cada miembro (no le pueden escribir).
+db.exec(`CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY, from_id TEXT NOT NULL, to_id TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL, read_at INTEGER);
+  CREATE INDEX IF NOT EXISTS messages_pair ON messages(from_id, to_id, created_at);
+  CREATE INDEX IF NOT EXISTS messages_to ON messages(to_id, read_at);
+  CREATE TABLE IF NOT EXISTS dm_blocks (builder_id TEXT NOT NULL, blocked_id TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (builder_id, blocked_id));`);
 const HIRING = `(SELECT COUNT(*) FROM jobs WHERE jobs.builder_id = builders.id AND jobs.closed_at IS NULL AND jobs.expires_at > unixepoch() * 1000) AS hiring`;
 const insert = db.prepare(`INSERT INTO builders (id,kind,name,company,email,country,also,city,building,website,handle,ip,created_at,referred_by,calls) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 const directoryQ = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders
@@ -365,7 +371,7 @@ const myBountiesQ = db.prepare(`SELECT x.*, (SELECT COUNT(*) FROM bounty_funds f
   FROM bounties x WHERE builder_id = :id AND closed_at IS NULL
     AND (expires_at > :now OR EXISTS (SELECT 1 FROM bounty_funds f WHERE f.bounty_id = x.id AND f.status = 'paid'))
   ORDER BY created_at DESC`);
-const me = r => ({ ...publicView(r), email: r.email, jobs: myJobsQ.all(r.id, Date.now()).map(j => jobView(j, r)),
+const me = r => ({ ...publicView(r), email: r.email, unread: unreadQ.get(r.id).n, jobs: myJobsQ.all(r.id, Date.now()).map(j => jobView(j, r)),
   // un bounty con depósito vencido sigue visible para su autor hasta elegir ganador o cerrarlo (reembolso)
   bounties: myBountiesQ.all({ id: r.id, now: Date.now() }).map(x => ({ ...bountyView(x, r), funding: fundingView(latestFund.get(x.id)) })),
   escrow: myFundsQ.all(r.id).map(fundingView) });
@@ -537,13 +543,75 @@ function search(res, q) {
   });
 }
 
+// ---------- mensajes directos ----------
+const unreadQ = db.prepare("SELECT COUNT(*) n FROM messages WHERE to_id = ? AND read_at IS NULL");
+const deleteMessagesOf = db.prepare("DELETE FROM messages WHERE from_id = ? OR to_id = ?");
+const deleteBlocksOf = db.prepare("DELETE FROM dm_blocks WHERE builder_id = ? OR blocked_id = ?");
+const insertMessage = db.prepare("INSERT INTO messages (id,from_id,to_id,body,created_at) VALUES (?,?,?,?,?)");
+const threadQ = db.prepare(`SELECT * FROM messages WHERE (from_id = :a AND to_id = :b) OR (from_id = :b AND to_id = :a) ORDER BY created_at DESC LIMIT 200`);
+const markRead = db.prepare("UPDATE messages SET read_at = ? WHERE to_id = ? AND from_id = ? AND read_at IS NULL");
+const inboxQ = db.prepare(`SELECT other, MAX(created_at) ts, SUM(CASE WHEN to_id = :me AND read_at IS NULL THEN 1 ELSE 0 END) unread,
+    (SELECT body FROM messages m2 WHERE (m2.from_id = :me AND m2.to_id = other) OR (m2.from_id = other AND m2.to_id = :me) ORDER BY created_at DESC LIMIT 1) last,
+    (SELECT from_id = :me FROM messages m2 WHERE (m2.from_id = :me AND m2.to_id = other) OR (m2.from_id = other AND m2.to_id = :me) ORDER BY created_at DESC LIMIT 1) mine
+  FROM (SELECT CASE WHEN from_id = :me THEN to_id ELSE from_id END other, created_at, to_id, read_at FROM messages WHERE from_id = :me OR to_id = :me)
+  GROUP BY other ORDER BY ts DESC LIMIT 100`);
+const pairExists = db.prepare("SELECT 1 FROM messages WHERE (from_id = :a AND to_id = :b) OR (from_id = :b AND to_id = :a) LIMIT 1");
+const newThreadsToday = db.prepare(`SELECT COUNT(DISTINCT to_id) n FROM messages m WHERE from_id = :me AND created_at > :since
+  AND NOT EXISTS (SELECT 1 FROM messages p WHERE p.from_id = m.to_id AND p.to_id = :me)
+  AND NOT EXISTS (SELECT 1 FROM messages p WHERE p.from_id = :me AND p.to_id = m.to_id AND p.created_at <= :since)`);
+const blockedQ = db.prepare("SELECT 1 FROM dm_blocks WHERE builder_id = ? AND blocked_id = ?");
+const addBlock = db.prepare("INSERT OR IGNORE INTO dm_blocks (builder_id, blocked_id, created_at) VALUES (?,?,?)");
+const dropBlock = db.prepare("DELETE FROM dm_blocks WHERE builder_id = ? AND blocked_id = ?");
+const MAX_NEW_THREADS_PER_DAY = 20;
+const msgView = (m, meId) => ({ id: m.id, mine: m.from_id === meId, body: m.body, ts: m.created_at, read: !!m.read_at });
+function inbox(res, builder) {
+  const rows = inboxQ.all({ me: builder.id });
+  const threads = rows.map(r => { const o = byId.get(r.other); return o && { with: publicView(o), ts: r.ts, unread: r.unread, last: r.last.slice(0, 140), mine: !!r.mine }; }).filter(Boolean);
+  json(res, 200, { ok: true, threads, unread: unreadQ.get(builder.id).n });
+}
+function thread(res, builder, otherId) {
+  const other = byId.get(otherId);
+  if (!other) return json(res, 404, { error: "This member is no longer in the directory." });
+  if (markRead.run(Date.now(), builder.id, otherId).changes) scheduleBackup();
+  json(res, 200, { ok: true, with: publicView(other), messages: threadQ.all({ a: builder.id, b: otherId }).reverse().map(m => msgView(m, builder.id)),
+    blocked: !!blockedQ.get(builder.id, otherId), unread: unreadQ.get(builder.id).n });
+}
+async function sendMessage(req, res, builder, otherId) {
+  if (limited("dm:" + builder.id, 20)) return json(res, 429, { error: "You're sending messages too fast, please wait a minute." });
+  let b;
+  try { b = await readBody(req, 8192); } catch { return json(res, 400, { error: "Invalid request." }); }
+  const body = typeof b.body === "string" ? b.body.replace(/[\u0000-\u0008\u000b-\u001f]/g, "").trim().slice(0, 1000) : "";
+  if (!body) return json(res, 400, { error: "Write a message first." });
+  const other = otherId !== builder.id && byId.get(otherId);
+  if (!other) return json(res, 404, { error: "This member is no longer in the directory." });
+  if (blockedQ.get(other.id, builder.id)) return json(res, 403, { error: "This member isn't accepting your messages." });
+  const now = Date.now(), fresh = !pairExists.get({ a: builder.id, b: other.id });
+  if (fresh && newThreadsToday.get({ me: builder.id, since: now - DAY }).n >= MAX_NEW_THREADS_PER_DAY)
+    return json(res, 429, { error: "You've started 20 new conversations today. Try again tomorrow." });
+  dropBlock.run(builder.id, other.id); // escribirle a alguien lo desbloquea
+  const firstUnread = unreadQ.get(other.id).n === 0;
+  persistWithEmail(() => {
+    insertMessage.run(randomUUID(), builder.id, other.id, body, now);
+    // un solo aviso por correo hasta que lea, y nunca si ese correo ya recibió algo hoy (no gastar su cupo de enlaces de acceso)
+    if (firstUnread && loginLoad(other.email) === 0) EMAIL.enqueue("dm", { id: randomUUID(), email: other.email });
+  });
+  scheduleBackup();
+  thread(res, builder, other.id);
+}
+function setBlock(res, builder, otherId, on) {
+  if (!byId.get(otherId) || otherId === builder.id) return json(res, 404, { error: "not found" });
+  on ? addBlock.run(builder.id, otherId, Date.now()) : dropBlock.run(builder.id, otherId);
+  scheduleBackup();
+  json(res, 200, { ok: true, blocked: on });
+}
+
 const deleteBuilder = db.prepare("DELETE FROM builders WHERE id = ?");
 const deleteJobsOf = db.prepare("DELETE FROM jobs WHERE builder_id = ?");
 const deleteTokensOf = db.prepare("DELETE FROM member_tokens WHERE builder_id = ?");
 function removeProfile(res, builder) {
   if (openEscrowOf.get(builder.id))
     return json(res, 409, { error: "You have bounty money in escrow. Pick a winner or close the bounty and wait for the refund before removing your profile." });
-  persistWithEmail(() => { deleteJobsOf.run(builder.id); deleteBountiesOf.run(builder.id); deleteTokensOf.run(builder.id); deleteBuilder.run(builder.id); });
+  persistWithEmail(() => { deleteMessagesOf.run(builder.id, builder.id); deleteBlocksOf.run(builder.id, builder.id); deleteJobsOf.run(builder.id); deleteBountiesOf.run(builder.id); deleteTokensOf.run(builder.id); deleteBuilder.run(builder.id); });
   if (builder.avatar) STORAGE?.remove(builder.avatar).catch(() => {});
   if (builder.brochure) STORAGE?.remove(builder.brochure).catch(() => {});
   scheduleBackup();
@@ -968,6 +1036,12 @@ const server = createServer(async (req, res) => {
       if (pathname === "/api/me" && req.method === "DELETE") return removeProfile(res, builder);
       if (pathname === "/api/me/avatar" && req.method === "POST") return await uploadAvatar(req, res, builder);
       if (pathname === "/api/me/avatar" && req.method === "DELETE") return removeAvatar(res, builder);
+      if (pathname === "/api/me/unread" && req.method === "GET") return json(res, 200, { ok: true, unread: unreadQ.get(builder.id).n });
+      if (pathname === "/api/me/inbox" && req.method === "GET") return inbox(res, builder);
+      const dm = /^\/api\/me\/messages\/([0-9a-f-]{36})(\/block|\/unblock)?$/.exec(pathname);
+      if (dm && !dm[2] && req.method === "GET") return thread(res, builder, dm[1]);
+      if (dm && !dm[2] && req.method === "POST") return await sendMessage(req, res, builder, dm[1]);
+      if (dm && dm[2] && req.method === "POST") return setBlock(res, builder, dm[1], dm[2] === "/block");
       if (pathname === "/api/me/network" && req.method === "POST") return await saveNetwork(req, res, builder);
       if (pathname === "/api/me/matches" && req.method === "GET") return networkMatches(res, builder);
       if (pathname === "/api/me/brochure" && req.method === "POST") return await uploadBrochure(req, res, builder);
