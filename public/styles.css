@@ -521,3 +521,6 @@ html:has(.me[open]) { overflow: hidden; }
 .me-tabs { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .me-tabs::-webkit-scrollbar { display: none; }
 @media (max-width: 420px) { .me-tabs label span { padding-left: 10px; padding-right: 10px; } }
+.s-sec li { display: flex; align-items: center; gap: 6px; }
+.s-sec li > .s-item { flex: 1; min-width: 0; }
+.s-sec li > [data-dm] { flex: none; }
