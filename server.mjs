@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { mkdirSync, readFileSync, readdirSync, rmSync, chmodSync, statSync, existsSync, writeFileSync } from "node:fs";
 import { join, extname, normalize } from "node:path";
-import { randomUUID, randomBytes, createHmac, createHash, timingSafeEqual } from "node:crypto";
+import { randomUUID, randomBytes, createHmac, createHash, timingSafeEqual, scrypt } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { WebSocketServer } from "ws";
 import { loadMoonpayConfig, MoonpayCommerce, USD_ID, validateCharge, verifyWebhook } from "./lib/moonpay.mjs";
@@ -40,7 +40,7 @@ const cols = new Set(db.prepare("PRAGMA table_info(builders)").all().map(c => c.
 // avatar: clave en S3 de la foto o logo; updated_at: última edición del perfil.
 // offer/seeking: qué ofrece y qué o a quién busca (agente de networking); brochure: clave en S3 de su PDF.
 for (const [col, def] of [["kind", "TEXT NOT NULL DEFAULT 'person'"], ["company", "TEXT"], ["website", "TEXT"], ["also", "TEXT NOT NULL DEFAULT '[]'"],
-  ["avatar", "TEXT"], ["updated_at", "INTEGER"], ["referred_by", "TEXT"], ["calls", "TEXT"], ["offer", "TEXT"], ["seeking", "TEXT"], ["brochure", "TEXT"]])
+  ["avatar", "TEXT"], ["updated_at", "INTEGER"], ["referred_by", "TEXT"], ["calls", "TEXT"], ["offer", "TEXT"], ["seeking", "TEXT"], ["brochure", "TEXT"], ["password_hash", "TEXT"]])
   if (!cols.has(col)) db.exec(`ALTER TABLE builders ADD COLUMN ${col} ${def}`);
 // Empleos publicados por miembros; vencen a los 60 días o cuando su autor los cierra.
 db.exec(`CREATE TABLE IF NOT EXISTS jobs (
@@ -371,7 +371,7 @@ const myBountiesQ = db.prepare(`SELECT x.*, (SELECT COUNT(*) FROM bounty_funds f
   FROM bounties x WHERE builder_id = :id AND closed_at IS NULL
     AND (expires_at > :now OR EXISTS (SELECT 1 FROM bounty_funds f WHERE f.bounty_id = x.id AND f.status = 'paid'))
   ORDER BY created_at DESC`);
-const me = r => ({ ...publicView(r), email: r.email, unread: unreadQ.get(r.id).n, jobs: myJobsQ.all(r.id, Date.now()).map(j => jobView(j, r)),
+const me = r => ({ ...publicView(r), email: r.email, unread: unreadQ.get(r.id).n, hasPassword: !!r.password_hash, jobs: myJobsQ.all(r.id, Date.now()).map(j => jobView(j, r)),
   // un bounty con depósito vencido sigue visible para su autor hasta elegir ganador o cerrarlo (reembolso)
   bounties: myBountiesQ.all({ id: r.id, now: Date.now() }).map(x => ({ ...bountyView(x, r), funding: fundingView(latestFund.get(x.id)) })),
   escrow: myFundsQ.all(r.id).map(fundingView) });
@@ -401,6 +401,53 @@ async function requestLink(req, res) {
     });
   }
   json(res, 200, { ok: true });
+}
+
+// ---------- contraseña opcional: se fija ya dentro (tras el enlace por correo) y luego se entra con correo + contraseña ----------
+// scrypt con sal aleatoria; se guarda "scrypt$<sal>$<hash>" en base64url.
+const scryptAsync = (pw, salt) => new Promise((ok, ko) => scrypt(pw, salt, 32, { N: 16384, r: 8, p: 1 }, (e, k) => e ? ko(e) : ok(k)));
+async function hashPassword(pw) { const salt = randomBytes(16); return `scrypt$${salt.toString("base64url")}$${(await scryptAsync(pw, salt)).toString("base64url")}`; }
+async function passwordOk(pw, stored) {
+  const [alg, salt, hash] = String(stored || "").split("$");
+  if (alg !== "scrypt" || !salt || !hash) return false;
+  const want = Buffer.from(hash, "base64url"), got = await scryptAsync(pw, Buffer.from(salt, "base64url"));
+  return want.length === got.length && timingSafeEqual(want, got);
+}
+const DUMMY_HASH = await hashPassword(randomBytes(12).toString("hex"));
+const setPassword = db.prepare("UPDATE builders SET password_hash = ?, updated_at = ? WHERE id = ?");
+const dropOtherSessions = db.prepare("DELETE FROM member_tokens WHERE builder_id = ? AND kind = 'session' AND hash <> ?");
+async function savePassword(req, res, builder) {
+  if (limited("pw:" + builder.id, 10, 15 * 60_000)) return json(res, 429, { error: "Too many attempts, please wait a few minutes." });
+  let b;
+  try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
+  const pw = typeof b.password === "string" ? b.password : "";
+  if (pw.length < 8) return json(res, 400, { error: "Use at least 8 characters." });
+  if (pw.length > 200) return json(res, 400, { error: "That password is too long." });
+  if (pw.toLowerCase() === builder.email) return json(res, 400, { error: "Don't use your email as the password." });
+  setPassword.run(await hashPassword(pw), Date.now(), builder.id);
+  // cambiar la contraseña cierra las demás sesiones abiertas
+  dropOtherSessions.run(builder.id, tokenHash(String(req.headers.authorization).slice(7)));
+  scheduleBackup();
+  json(res, 200, { ok: true, me: me(byId.get(builder.id)) });
+}
+async function passwordSignin(req, res) {
+  const ip = clientIp(req);
+  if (limited("pwin:" + ip, 10, 15 * 60_000)) return json(res, 429, { error: "Too many attempts, please wait a few minutes." });
+  let b;
+  try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
+  const human = await humanCheck(b, ip);
+  if (human === "bot") return json(res, 401, { error: "Wrong email or password." });
+  if (human) return json(res, 400, { error: human });
+  const email = clean(b.email, 120).toLowerCase(), pw = typeof b.password === "string" ? b.password.slice(0, 200) : "";
+  if (!EMAIL_RE.test(email) || !pw) return json(res, 400, { error: "Add your email and password." });
+  if (limited("pwmail:" + email, 10, 60 * 60_000)) return json(res, 429, { error: "Too many attempts for this email, please wait or use an email link." });
+  const found = byEmail.get(email);
+  // misma respuesta (y mismo trabajo de scrypt) exista o no el correo
+  const ok = await passwordOk(pw, found?.password_hash || DUMMY_HASH) && !!found?.password_hash;
+  if (!ok) return json(res, 401, { error: "Wrong email or password. Never set a password? Use the email link below, then set one in your profile." });
+  const builder = byId.get(found.id), session = newToken(), now = Date.now();
+  insertToken.run(tokenHash(session), builder.id, "session", now, now + 30 * DAY);
+  json(res, 200, { ok: true, session, me: me(builder) });
 }
 
 async function startSession(req, res) {
@@ -1028,6 +1075,7 @@ const server = createServer(async (req, res) => {
     }
     if (pathname === "/api/signin/link" && req.method === "POST") return await requestLink(req, res);
     if (pathname === "/api/signin" && req.method === "POST") return await startSession(req, res);
+    if (pathname === "/api/signin/password" && req.method === "POST") return await passwordSignin(req, res);
     if (pathname === "/api/me" || pathname.startsWith("/api/me/")) {
       const builder = sessionOf(req);
       if (!builder) return json(res, 401, { error: "Please sign in again." });
@@ -1036,6 +1084,7 @@ const server = createServer(async (req, res) => {
       if (pathname === "/api/me" && req.method === "DELETE") return removeProfile(res, builder);
       if (pathname === "/api/me/avatar" && req.method === "POST") return await uploadAvatar(req, res, builder);
       if (pathname === "/api/me/avatar" && req.method === "DELETE") return removeAvatar(res, builder);
+      if (pathname === "/api/me/password" && req.method === "POST") return await savePassword(req, res, builder);
       if (pathname === "/api/me/unread" && req.method === "GET") return json(res, 200, { ok: true, unread: unreadQ.get(builder.id).n });
       if (pathname === "/api/me/inbox" && req.method === "GET") return inbox(res, builder);
       const dm = /^\/api\/me\/messages\/([0-9a-f-]{36})(\/block|\/unblock)?$/.exec(pathname);

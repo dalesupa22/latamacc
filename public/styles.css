@@ -524,3 +524,12 @@ html:has(.me[open]) { overflow: hidden; }
 .s-sec li { display: flex; align-items: center; gap: 6px; }
 .s-sec li > .s-item { flex: 1; min-width: 0; }
 .s-sec li > [data-dm] { flex: none; }
+
+/* acceso con contraseña */
+.or { display: flex; align-items: center; gap: 10px; margin-top: 22px; color: var(--mute); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.me .or + .form { margin-top: 12px; }
+.pwform { margin-top: 18px !important; padding: 14px; border: 1px solid var(--line); border-radius: 14px; gap: 8px !important; }
+.pwform .fine { margin: 0; }
+.pw-row { display: flex; gap: 8px; }
+.pw-row input { flex: 1; min-width: 0; }

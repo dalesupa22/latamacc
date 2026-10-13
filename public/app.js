@@ -1014,6 +1014,10 @@ function renderMe() {
   $("#photo-file").disabled = !member.uploads;
   $("#me-profile .photo").hidden = !member.uploads && !m.avatar;
   setUnread(m.unread || 0);
+  pwform.username.value = m.email;
+  $("#pw-title").textContent = m.hasPassword ? "Password" : "Set a password";
+  $("#pw-state").textContent = m.hasPassword ? "You can sign in with your email and password ✦ Change it here." : "Sign in next time with your email and password, no email link needed.";
+  pwform.querySelector("button[type=submit]").textContent = m.hasPassword ? "Change password" : "Save password";
   nform.offer.value = m.offer || ""; nform.seeking.value = m.seeking || "";
   const bu = brochureUrl(m.brochure);
   $("#brochure-view").hidden = $("#brochure-remove").hidden = !bu; if (bu) $("#brochure-view").href = bu;
@@ -1048,6 +1052,34 @@ signin.addEventListener("submit", async e => {
     formMsg(signin, "Check your inbox ✦ If that email is in the directory, a sign-in link from danny@latamacc.si is on its way (subject \"Your LATAMACC sign-in link\"). It can take a couple of minutes; if you don't see it, check Spam, Promotions or Updates. We send up to 3 links per email per day, so use the most recent one. Each link works once, for 24 hours.", true);
   } catch (err) { formMsg(signin, err.message); }
   finally { btn.disabled = false; resetGuard("signin"); }
+});
+// correo + contraseña (para quien ya fijó una desde su perfil)
+const pwsignin = $("#pwsignin");
+pwsignin.addEventListener("submit", async e => {
+  e.preventDefault();
+  const btn = pwsignin.querySelector("button[type=submit]"), data = Object.fromEntries(new FormData(pwsignin));
+  if (!data.email.includes("@") || !data.password) return formMsg(pwsignin, "Add your email and password.");
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/signin/password", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(guarded(data, "pwsignin")) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "Could not sign in.");
+    saveSession(j.session); member.me = j.me; pwsignin.reset(); renderMe(); showMe("profile"); loadDir();
+    toast(`Welcome back, ${j.me.name} ✦`);
+  } catch (err) { formMsg(pwsignin, err.message); }
+  finally { btn.disabled = false; }
+});
+// el correo escrito en un formulario se copia al otro
+pwsignin.email.addEventListener("input", () => { signin.email.value = pwsignin.email.value; });
+const pwform = $("#pwform");
+pwform.addEventListener("submit", async e => {
+  e.preventDefault();
+  const pw = pwform.password.value, btn = pwform.querySelector("button[type=submit]");
+  if (pw.length < 8) return formMsg(pwform, "Use at least 8 characters.");
+  btn.disabled = true;
+  try { await api("/api/me/password", { method: "POST", json: { password: pw } }); pwform.password.value = ""; formMsg(pwform, "Password saved ✦ Next time sign in with your email and password.", true); }
+  catch (err) { formMsg(pwform, err.message); }
+  finally { btn.disabled = false; }
 });
 pform.querySelectorAll('input[name="kind"]').forEach(r => r.addEventListener("change", () => syncKind(pform)));
 pform.addEventListener("submit", async e => {

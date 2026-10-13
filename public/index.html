@@ -363,13 +363,21 @@
     <button class="cp-close" type="button" id="me-close" aria-label="Close">×</button>
     <div id="me-signin">
       <p class="kicker mono">Members</p>
-      <h3 id="me-title">Edit your profile</h3>
-      <p class="me-lead">Enter the email you joined with and we'll send you a sign-in link. No password needed.</p>
+      <h3 id="me-title">Sign in</h3>
+      <p class="me-lead">Sign in with your email and password. First time here? Use the email link, then set a password in your profile.</p>
+      <form id="pwsignin" class="form" novalidate>
+        <label>Email<input name="email" type="email" required maxlength="120" autocomplete="username" placeholder="ana@startup.ai" /></label>
+        <label>Password<input name="password" type="password" required maxlength="200" autocomplete="current-password" /></label>
+        <input name="hp_field" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
+        <button class="btn primary big" type="submit">Sign in</button>
+        <p class="form-msg" role="status"></p>
+      </form>
+      <div class="or mono"><span>or get a one-time link by email</span></div>
       <form id="signin" class="form" novalidate>
         <label>Email<input name="email" type="email" required maxlength="120" autocomplete="email" placeholder="ana@startup.ai" /></label>
         <input name="hp_field" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
         <div class="ts" data-form="signin"></div>
-        <button class="btn primary big" type="submit">Email me a sign-in link</button>
+        <button class="btn big" type="submit">Email me a sign-in link</button>
         <p class="form-msg" role="status"></p>
       </form>
       <p class="fine">Not in the directory yet? <a href="#join" data-close>Join first</a>, it takes 30 seconds.</p>
@@ -391,6 +399,13 @@
         <label><input type="radio" name="metab" value="jobs" /> <span>Jobs</span></label>
       </div>
       <div id="me-profile">
+        <form id="pwform" class="form pwform" novalidate>
+          <b class="form-title" id="pw-title">Set a password</b>
+          <span class="fine" id="pw-state">Sign in next time with your email and password, no email link needed.</span>
+          <input name="username" type="email" autocomplete="username" hidden />
+          <div class="pw-row"><input name="password" type="password" minlength="8" maxlength="200" autocomplete="new-password" placeholder="At least 8 characters" aria-label="New password" /><button class="btn small" type="submit">Save password</button></div>
+          <p class="form-msg" role="status"></p>
+        </form>
         <div class="photo">
           <span class="avatar" id="photo-preview"></span>
           <div>
