@@ -496,6 +496,7 @@ function connect() {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type === "hello" || m.type === "presence") { setOnline(m.online); S.watching = m.watching || {}; }
     else if (m.type === "join") onJoin(m.builder, m.total);
+    else if (m.type === "buy") { refreshState(); if (m.id === member.me?.id) { api("/api/me").catch(() => {}); toast("🛒 New buy request! Open Edit profile → Buyers."); } }
     else if (m.type === "update" || m.type === "remove") { refreshState(); loadDir(); if (m.type === "remove") { loadJobs(); loadBounties(); } }
     else if (m.type === "jobs") { loadJobs(); patchEntry(m.builder); }
     else if (m.type === "bounties") loadBounties();
@@ -547,6 +548,7 @@ async function refreshState() {
   const have = new Set(S.points.map(p => `${p.id}|${p.country}`));
   for (const [key, b] of want) if (!have.has(key)) { const pt = placePoint(b, key.split("|")[1]); if (pt) S.points.push(pt); }
   S.seen = new Set(st.points.map(b => b.id));
+  S.topWanted = st.topWanted || []; S.buyEnabled = st.buyEnabled || 0; renderWanted();
   renderStats(); renderFeed(false); renderBoard(); renderGrowth(); renderChips();
   if (panelCC) openCountry(panelCC);
 }
@@ -720,7 +722,8 @@ function renderDir() {
       ${b.also?.length ? `<span class="also-flags">Also in ${b.also.map(flag).join(" ")}</span>` : ""}
       ${networkLines(b)}
       ${invitedLine(b)}
-      <div class="card-btns">${dmButton(b)}${callLink(b)}${brochureLink(b)}</div>
+      ${b.buy ? `<p class="net-line"><span>Sells</span>${esc(b.buy)}</p>` : ""}
+      <div class="card-btns">${buyButton(b)}${dmButton(b)}${callLink(b)}${brochureLink(b)}</div>
       <div class="card-foot"><span>${esc([b.city, cname(b.country)].filter(Boolean).join(", "))}</span>
         <span class="links">${site ? `<a href="${esc(site)}" target="_blank" rel="noopener nofollow">${esc(host(site))} ↗</a>` : ""}${b.handle ? `<a href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow">𝕏</a>` : ""}</span></div>
     </li>`;
@@ -834,6 +837,7 @@ form.addEventListener("submit", async e => {
 });
 
 const callLink = b => safeUrl(b.calls) ? `<a class="btn small primary call" href="${esc(safeUrl(b.calls))}" target="_blank" rel="noopener nofollow">📞 Book a call</a>` : "";
+const buyButton = b => b.buy && member.me?.id !== b.id ? `<button class="btn small primary" type="button" data-buy="${esc(b.id)}" data-buyname="${esc(b.name)}" data-buywhat="${esc(b.buy)}">🛒 Buy</button>` : "";
 const dmButton = b => member.me?.id === b.id ? "" : `<button class="btn small" type="button" data-dm="${esc(b.id)}">✉ Message</button>`;
 const brochureUrl = u => /^\/media\/brochures\/[0-9a-f/-]+\.pdf$/.test(u || "") ? u : "";
 const brochureLink = b => brochureUrl(b.brochure) ? `<a class="btn small" href="${esc(brochureUrl(b.brochure))}" target="_blank" rel="noopener">📄 Brochure</a>` : "";
@@ -971,6 +975,8 @@ async function api(path, opts = {}) {
 }
 function setTab(tab) {
   $("#me-profile").hidden = tab !== "profile"; $("#me-network").hidden = tab !== "network"; $("#me-messages").hidden = tab !== "messages";
+  $("#me-buyers").hidden = tab !== "buyers";
+  if (tab === "buyers" && member.me) loadBuyers();
   if (tab === "messages" && member.me) openInbox(); $("#me-jobs").hidden = tab !== "jobs"; $("#me-bounties").hidden = tab !== "bounties";
   dlg.querySelector(`input[name="metab"][value="${tab}"]`).checked = true;
   if (tab === "network" && (member.me?.offer || member.me?.seeking) && !$("#matches").children.length) runMatches();
@@ -1014,6 +1020,8 @@ function renderMe() {
   $("#photo-file").disabled = !member.uploads;
   $("#me-profile .photo").hidden = !member.uploads && !m.avatar;
   setUnread(m.unread || 0);
+  buyform.buy.value = m.buy || "";
+  document.querySelectorAll(".buy-n").forEach(el => { el.textContent = m.buyNew ? String(m.buyNew) : ""; });
   pwform.username.value = m.email;
   $("#pw-title").textContent = m.hasPassword ? "Password" : "Set a password";
   $("#pw-state").textContent = m.hasPassword ? "You can sign in with your email and password ✦ Change it here." : "Sign in next time with your email and password, no email link needed.";
@@ -1139,7 +1147,7 @@ function matchCard(m) {
       ${m.theyHave.length && m.theyWant.length ? `<span class="badge escrow">Mutual</span>` : ""}</div>
     <p class="why">${why.join("<br />")}</p>
     ${networkLines(b)}
-    <div class="card-actions">${dmButton(b)}${callLink(b)}${brochureLink(b)}${site ? `<a class="btn small" href="${esc(site)}" target="_blank" rel="noopener nofollow">${esc(host(site))} ↗</a>` : ""}${b.handle ? `<a class="btn small" href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow">𝕏</a>` : ""}<button class="btn small" type="button" data-map="${esc(b.id)}" data-cc="${esc(b.country)}">On the map</button></div>
+    <div class="card-actions">${buyButton(b)}${dmButton(b)}${callLink(b)}${brochureLink(b)}${site ? `<a class="btn small" href="${esc(site)}" target="_blank" rel="noopener nofollow">${esc(host(site))} ↗</a>` : ""}${b.handle ? `<a class="btn small" href="https://x.com/${encodeURIComponent(b.handle)}" target="_blank" rel="noopener nofollow">𝕏</a>` : ""}<button class="btn small" type="button" data-map="${esc(b.id)}" data-cc="${esc(b.country)}">On the map</button></div>
   </li>`;
 }
 async function runMatches() {
@@ -1181,7 +1189,7 @@ $("#matches").addEventListener("click", e => {
 const dms = { with: null, timer: 0 };
 function setUnread(n) {
   if (member.me) member.me.unread = n;
-  document.querySelectorAll(".unread-n").forEach(el => { el.textContent = n ? String(n) : ""; });
+  document.querySelectorAll(".unread-n:not(.buy-n)").forEach(el => { el.textContent = n ? String(n) : ""; });
   $(".nav-inbox").hidden = !member.me;
 }
 const dmTime = ts => new Date(ts).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -1262,6 +1270,69 @@ async function pollUnread() {
 }
 setInterval(pollUnread, 30_000);
 setTimeout(pollUnread, 1500);
+
+// ---------- botón "Buy" ----------
+const buydlg = $("#buydlg"), bbuy = $("#bbuy"), buyform = $("#buyform");
+let buySeller = null;
+function openBuy(id, name, what) {
+  buySeller = id;
+  $("#buy-title").textContent = `Buy from ${name}`;
+  $("#buy-what").textContent = what;
+  bbuy.querySelector(".form-msg").textContent = "";
+  if (member.me) { bbuy.name.value ||= member.me.name; bbuy.email.value ||= member.me.email; }
+  if (dlg.open) dlg.close();
+  if (sdlg.open) sdlg.close();
+  buydlg.showModal(); buydlg.scrollTop = 0;
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-buy]");
+  if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  openBuy(b.dataset.buy, b.dataset.buyname, b.dataset.buywhat);
+}, true);
+$("#buy-close").addEventListener("click", () => buydlg.close());
+buydlg.addEventListener("click", e => { if (e.target === buydlg) buydlg.close(); });
+bbuy.addEventListener("submit", async e => {
+  e.preventDefault();
+  const btn = bbuy.querySelector("button[type=submit]"), data = Object.fromEntries(new FormData(bbuy));
+  if (!data.name.trim() || !data.email.includes("@") || data.message.trim().length < 5) return formMsg(bbuy, "Add your name, email and what you want to buy.");
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/buy/${buySeller}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(guarded(data, "buy")) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "Could not send it. Please try again.");
+    bbuy.message.value = "";
+    formMsg(bbuy, `Sent ✦ ${$("#buy-title").textContent.replace(/^Buy from /, "")} got a notification and will reach you at ${data.email}.`, true);
+  } catch (err) { formMsg(bbuy, err.message); }
+  finally { btn.disabled = false; resetGuard("buy"); }
+});
+buyform.addEventListener("submit", async e => {
+  e.preventDefault();
+  const btn = buyform.querySelector("button[type=submit]"); btn.disabled = true;
+  try {
+    await api("/api/me/buy", { method: "POST", json: { buy: buyform.buy.value } });
+    formMsg(buyform, member.me.buy ? "Saved ✦ Your 🛒 Buy button is live on your profile." : "Your Buy button is off.", true); loadDir();
+  } catch (err) { formMsg(buyform, err.message); }
+  finally { btn.disabled = false; }
+});
+async function loadBuyers() {
+  const ul = $("#buyers");
+  try {
+    const j = await api("/api/me/buyers");
+    document.querySelectorAll(".buy-n").forEach(el => { el.textContent = ""; });
+    if (member.me) member.me.buyNew = 0;
+    ul.innerHTML = j.requests.length ? `<li class="form-title">Buy requests (${j.requests.length}) · ${j.last30} in the last 30 days</li>` + j.requests.map(q => `<li class="job buyer ${q.isNew ? "new" : ""}">
+      <div class="job-top"><span class="avatar">${esc([...q.name][0]?.toUpperCase() || "?")}</span><div><b>${esc(q.name)}${q.isNew ? ` <span class="badge escrow">New</span>` : ""}</b><span>${esc([q.company, ago(q.ts)].filter(Boolean).join(" · "))}</span></div></div>
+      <p class="why">${esc(q.message)}</p>
+      <div class="card-actions"><a class="btn small primary" href="mailto:${encodeURIComponent(q.email)}?subject=${encodeURIComponent("Your request on LATAMACC")}">✉ ${esc(q.email)}</a>${q.phone ? `<a class="btn small" href="https://wa.me/${esc(q.phone.replace(/[^0-9]/g, ""))}" target="_blank" rel="noopener">WhatsApp ${esc(q.phone)}</a>` : ""}</div>
+    </li>`).join("") : `<li class="fine">${member.me?.buy ? "No buy requests yet. Share your profile so buyers find your 🛒 Buy button." : "Turn on your Buy button above to start getting buy requests."}</li>`;
+  } catch (err) { ul.innerHTML = `<li class="fine">${esc(err.message)}</li>`; }
+}
+function renderWanted() {
+  const rows = S.topWanted || [], max = rows[0]?.requests || 1;
+  $("#wanted-sum").textContent = rows.length ? "Members with the most 🛒 buy requests." : `${(S.buyEnabled || 0).toLocaleString("en")} members have a 🛒 Buy button. The ones buyers want most show up here.`;
+  $("#wanted").innerHTML = rows.map(r => `<li title="${esc(r.name)}: ${r.requests} buy requests"><span>${flag(r.country)}</span><span class="cn">${esc(r.name)}</span><div class="bar"><i style="width:${(r.requests / max) * 100}%"></i></div><b>${r.requests}</b></li>`).join("");
+}
 
 // ---------- búsqueda global ----------
 const sdlg = $("#search"), sq = $("#sq");
@@ -1581,6 +1652,7 @@ addEventListener("resize", layout);
 
   S.total = state.total; S.byCountry = state.byCountry; S.recent = state.recent; S.watching = state.watching || {}; S.growth = state.growth || []; S.kinds = state.kinds || {};
   $("#net-n").textContent = (state.networkReady || 0).toLocaleString("en");
+  S.topWanted = state.topWanted || []; S.buyEnabled = state.buyEnabled || 0; renderWanted();
   S.referred = state.referred || 0; $("#calls-n").textContent = state.openToCalls ? state.openToCalls : ""; S.topInviters = state.topInviters || []; showInviter();
   buildAlso(form); buildAlso(pform);
   for (const sel2 of [pform.country, jform.country, $("#jcountry")])

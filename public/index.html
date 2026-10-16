@@ -217,6 +217,11 @@
         <p class="fine" id="inv-sum"></p>
         <ol id="inviters" class="board"></ol>
       </div>
+      <div class="inviters reveal">
+        <div class="feed-head mono">Most wanted · last 30 days</div>
+        <p class="fine" id="wanted-sum"></p>
+        <ol id="wanted" class="board"></ol>
+      </div>
     </div>
   </section>
 
@@ -359,6 +364,28 @@
     <div id="s-results" aria-live="polite"></div>
   </dialog>
 
+  <dialog id="buydlg" class="me" aria-labelledby="buy-title">
+    <button class="cp-close" type="button" id="buy-close" aria-label="Close">×</button>
+    <p class="kicker mono">🛒 Buy</p>
+    <h3 id="buy-title">Buy</h3>
+    <p class="me-lead" id="buy-what"></p>
+    <form id="bbuy" class="form" novalidate>
+      <div class="row">
+        <label>Your name<input name="name" required maxlength="80" autocomplete="name" /></label>
+        <label>Email<input name="email" type="email" required maxlength="120" autocomplete="email" /></label>
+      </div>
+      <div class="row">
+        <label><span>Company <span class="opt">(optional)</span></span><input name="company" maxlength="80" autocomplete="organization" /></label>
+        <label><span>Phone / WhatsApp <span class="opt">(optional)</span></span><input name="phone" maxlength="40" autocomplete="tel" inputmode="tel" /></label>
+      </div>
+      <label>What do you want to buy?<textarea name="message" required maxlength="1000" rows="3" placeholder="What you need, how many, budget, timeline…"></textarea></label>
+      <input name="hp_field" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
+      <p class="fine">They'll get a notification and your contact details to reach you directly.</p>
+      <button class="btn primary big" type="submit">Send buy request</button>
+      <p class="form-msg" role="status"></p>
+    </form>
+  </dialog>
+
   <dialog id="me" class="me" aria-labelledby="me-title">
     <button class="cp-close" type="button" id="me-close" aria-label="Close">×</button>
     <div id="me-signin">
@@ -395,6 +422,7 @@
         <label><input type="radio" name="metab" value="profile" checked /> <span>Profile</span></label>
         <label><input type="radio" name="metab" value="network" /> <span>Network</span></label>
         <label><input type="radio" name="metab" value="messages" /> <span>Messages <b class="unread-n"></b></span></label>
+        <label><input type="radio" name="metab" value="buyers" /> <span>Buyers <b class="buy-n unread-n"></b></span></label>
         <label><input type="radio" name="metab" value="bounties" /> <span>Bounties</span></label>
         <label><input type="radio" name="metab" value="jobs" /> <span>Jobs</span></label>
       </div>
@@ -463,6 +491,16 @@
           <p class="form-msg" role="status"></p>
         </form>
         <ul id="matches" class="my-jobs matches"></ul>
+      </div>
+      <div id="me-buyers" hidden>
+        <form id="buyform" class="form" novalidate>
+          <b class="form-title">Your “Buy” button</b>
+          <span class="fine">Turn it on and a 🛒 Buy button shows on your profile. Buyers leave their contact details and you get an email to reach them.</span>
+          <label><span>What can people buy from you? <span class="opt">(leave empty to turn it off)</span></span><input name="buy" maxlength="140" placeholder="AI customer-service agents · from $500/month" /></label>
+          <button class="btn primary big" type="submit">Save</button>
+          <p class="form-msg" role="status"></p>
+        </form>
+        <ul id="buyers" class="my-jobs buyers"></ul>
       </div>
       <div id="me-messages" hidden>
         <div id="inbox-view">

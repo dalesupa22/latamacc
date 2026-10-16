@@ -533,3 +533,9 @@ html:has(.me[open]) { overflow: hidden; }
 .pwform .fine { margin: 0; }
 .pw-row { display: flex; gap: 8px; }
 .pw-row input { flex: 1; min-width: 0; }
+
+/* botón Buy y solicitudes de compra */
+.buyer.new { border-color: rgba(240,200,110,.55); }
+.buyers .why { color: var(--fg); font-size: 14px; white-space: pre-wrap; display: block; -webkit-line-clamp: unset; }
+.buyers .card-actions { justify-content: flex-start; }
+.buyers .card-actions a.btn.primary, .card-btns .btn.primary[data-buy] { color: #1a1204; }

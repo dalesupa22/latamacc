@@ -40,7 +40,7 @@ const cols = new Set(db.prepare("PRAGMA table_info(builders)").all().map(c => c.
 // avatar: clave en S3 de la foto o logo; updated_at: última edición del perfil.
 // offer/seeking: qué ofrece y qué o a quién busca (agente de networking); brochure: clave en S3 de su PDF.
 for (const [col, def] of [["kind", "TEXT NOT NULL DEFAULT 'person'"], ["company", "TEXT"], ["website", "TEXT"], ["also", "TEXT NOT NULL DEFAULT '[]'"],
-  ["avatar", "TEXT"], ["updated_at", "INTEGER"], ["referred_by", "TEXT"], ["calls", "TEXT"], ["offer", "TEXT"], ["seeking", "TEXT"], ["brochure", "TEXT"], ["password_hash", "TEXT"]])
+  ["avatar", "TEXT"], ["updated_at", "INTEGER"], ["referred_by", "TEXT"], ["calls", "TEXT"], ["offer", "TEXT"], ["seeking", "TEXT"], ["brochure", "TEXT"], ["password_hash", "TEXT"], ["buy", "TEXT"]])
   if (!cols.has(col)) db.exec(`ALTER TABLE builders ADD COLUMN ${col} ${def}`);
 // Empleos publicados por miembros; vencen a los 60 días o cuando su autor los cierra.
 db.exec(`CREATE TABLE IF NOT EXISTS jobs (
@@ -81,6 +81,11 @@ db.exec(`CREATE TABLE IF NOT EXISTS messages (
   CREATE INDEX IF NOT EXISTS messages_pair ON messages(from_id, to_id, created_at);
   CREATE INDEX IF NOT EXISTS messages_to ON messages(to_id, read_at);
   CREATE TABLE IF NOT EXISTS dm_blocks (builder_id TEXT NOT NULL, blocked_id TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (builder_id, blocked_id));`);
+// Solicitudes de compra que deja cualquiera con el botón "Buy" de un perfil; seen_at: cuándo las vio el vendedor.
+db.exec(`CREATE TABLE IF NOT EXISTS buy_requests (
+  id TEXT PRIMARY KEY, seller_id TEXT NOT NULL, name TEXT NOT NULL, email TEXT NOT NULL, company TEXT, phone TEXT, message TEXT NOT NULL,
+  ip TEXT, created_at INTEGER NOT NULL, seen_at INTEGER);
+  CREATE INDEX IF NOT EXISTS buy_requests_seller ON buy_requests(seller_id, created_at);`);
 const HIRING = `(SELECT COUNT(*) FROM jobs WHERE jobs.builder_id = builders.id AND jobs.closed_at IS NULL AND jobs.expires_at > unixepoch() * 1000) AS hiring`;
 const insert = db.prepare(`INSERT INTO builders (id,kind,name,company,email,country,also,city,building,website,handle,ip,created_at,referred_by,calls) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 const directoryQ = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders
@@ -218,7 +223,7 @@ function publicView(r) {
   return { id: r.id, n: r.n, kind: r.kind || "person", name: r.name, company: r.company || "", country: r.country, city: r.city || "",
     also: alsoOf(r), building: r.building || "", website: r.website || "", handle: r.handle || "", ts: r.created_at,
     avatar: r.avatar ? `/media/${r.avatar}` : "", hiring: r.hiring || 0, calls: r.calls || "",
-    offer: r.offer || "", seeking: r.seeking || "", brochure: r.brochure ? `/media/${r.brochure}` : "",
+    offer: r.offer || "", seeking: r.seeking || "", brochure: r.brochure ? `/media/${r.brochure}` : "", buy: r.buy || "",
     ref: refOf(r.id), invitedBy: by ? { id: by.id, name: by.name, n: by.n } : null, invited: invitedCountQ.get(r.id).n };
 }
 // ---------- referidos: cada miembro invita con latamacc.si/?ref=<8 primeros caracteres de su id> ----------
@@ -230,6 +235,10 @@ const byRefQ = db.prepare("SELECT rowid AS n, id, name, kind, country FROM build
 const topInvitersQ = db.prepare(`SELECT b.rowid AS n, b.id, b.name, b.country, COUNT(*) invited FROM builders r JOIN builders b ON b.id = r.referred_by
   GROUP BY b.id ORDER BY invited DESC, MIN(r.created_at) LIMIT 5`);
 const callsOpenQ = db.prepare("SELECT COUNT(*) n FROM builders WHERE COALESCE(calls, '') <> ''");
+const buyEnabledQ = db.prepare("SELECT COUNT(*) n FROM builders WHERE COALESCE(buy, '') <> ''");
+// más pedidos: vendedores con más solicitudes de compra en los últimos 30 días (solo conteos públicos)
+const topWantedQ = db.prepare(`SELECT b.rowid AS n, b.id, b.name, b.country, b.kind, COUNT(*) requests FROM buy_requests q JOIN builders b ON b.id = q.seller_id
+  WHERE q.created_at > ? GROUP BY b.id ORDER BY requests DESC, MAX(q.created_at) DESC LIMIT 5`);
 const networkReadyQ = db.prepare("SELECT COUNT(*) n FROM builders WHERE COALESCE(offer, '') <> '' OR COALESCE(seeking, '') <> ''");
 const referredTotalQ = db.prepare("SELECT COUNT(*) n FROM builders WHERE referred_by IS NOT NULL");
 const inviterOf = code => REF_RE.test(String(code || "")) ? byRefQ.get(String(code)) : null;
@@ -254,6 +263,8 @@ function state() {
     referred: referredTotalQ.get().n,
     openToCalls: callsOpenQ.get().n,
     networkReady: networkReadyQ.get().n,
+    buyEnabled: buyEnabledQ.get().n,
+    topWanted: topWantedQ.all(Date.now() - 30 * DAY).map(r => ({ id: r.id, n: r.n, name: r.name, country: r.country, kind: r.kind || "person", requests: r.requests })),
     topInviters: topInvitersQ.all().map(r => ({ id: r.id, n: r.n, name: r.name, country: r.country, invited: r.invited })),
     ...presence(),
     merchPayments: merchPayments(),
@@ -371,7 +382,7 @@ const myBountiesQ = db.prepare(`SELECT x.*, (SELECT COUNT(*) FROM bounty_funds f
   FROM bounties x WHERE builder_id = :id AND closed_at IS NULL
     AND (expires_at > :now OR EXISTS (SELECT 1 FROM bounty_funds f WHERE f.bounty_id = x.id AND f.status = 'paid'))
   ORDER BY created_at DESC`);
-const me = r => ({ ...publicView(r), email: r.email, unread: unreadQ.get(r.id).n, hasPassword: !!r.password_hash, jobs: myJobsQ.all(r.id, Date.now()).map(j => jobView(j, r)),
+const me = r => ({ ...publicView(r), email: r.email, unread: unreadQ.get(r.id).n, hasPassword: !!r.password_hash, buyNew: buyNewQ.get(r.id).n, jobs: myJobsQ.all(r.id, Date.now()).map(j => jobView(j, r)),
   // un bounty con depósito vencido sigue visible para su autor hasta elegir ganador o cerrarlo (reembolso)
   bounties: myBountiesQ.all({ id: r.id, now: Date.now() }).map(x => ({ ...bountyView(x, r), funding: fundingView(latestFund.get(x.id)) })),
   escrow: myFundsQ.all(r.id).map(fundingView) });
@@ -652,13 +663,68 @@ function setBlock(res, builder, otherId, on) {
   json(res, 200, { ok: true, blocked: on });
 }
 
+// ---------- botón "Buy": compradores dejan sus datos y el vendedor recibe un aviso ----------
+const buyNewQ = db.prepare("SELECT COUNT(*) n FROM buy_requests WHERE seller_id = ? AND seen_at IS NULL");
+const deleteBuysOf = db.prepare("DELETE FROM buy_requests WHERE seller_id = ?");
+const setBuy = db.prepare("UPDATE builders SET buy = ?, updated_at = ? WHERE id = ?");
+const insertBuy = db.prepare("INSERT INTO buy_requests (id,seller_id,name,email,company,phone,message,ip,created_at) VALUES (?,?,?,?,?,?,?,?,?)");
+const recentBuyFrom = db.prepare("SELECT 1 FROM buy_requests WHERE seller_id = ? AND email = ? AND created_at > ? LIMIT 1");
+const buyListQ = db.prepare("SELECT * FROM buy_requests WHERE seller_id = ? ORDER BY created_at DESC LIMIT 200");
+const markBuysSeen = db.prepare("UPDATE buy_requests SET seen_at = ? WHERE seller_id = ? AND seen_at IS NULL");
+const buyCountQ = db.prepare("SELECT COUNT(*) n FROM buy_requests WHERE seller_id = ? AND created_at > ?");
+async function saveBuy(req, res, builder) {
+  if (limited("edit:" + builder.id, 30)) return json(res, 429, { error: "Too many changes, please wait a minute." });
+  let b;
+  try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
+  setBuy.run(clean(b.buy, 140) || null, Date.now(), builder.id);
+  scheduleBackup();
+  const row = byId.get(builder.id);
+  broadcast({ type: "update", builder: publicView(row) });
+  json(res, 200, { ok: true, me: me(row) });
+}
+async function buyRequest(req, res, sellerId) {
+  const ip = clientIp(req);
+  if (limited("buy:" + ip, 8, 60 * 60_000)) return json(res, 429, { error: "Too many requests, please try again later." });
+  let b;
+  try { b = await readBody(req, 8192); } catch { return json(res, 400, { error: "Invalid request." }); }
+  const human = await humanCheck(b, ip);
+  if (human === "bot") return json(res, 200, { ok: true });
+  if (human) return json(res, 400, { error: human });
+  const seller = byId.get(sellerId);
+  if (!seller || !seller.buy) return json(res, 404, { error: "This member isn't taking buy requests right now." });
+  const name = clean(b.name, 80), email = clean(b.email, 120).toLowerCase(), company = clean(b.company, 80), phone = clean(b.phone, 40);
+  const message = typeof b.message === "string" ? b.message.replace(/[\u0000-\u0008\u000b-\u001f<>]/g, "").trim().slice(0, 1000) : "";
+  if (name.length < 2) return json(res, 400, { error: "Add your name." });
+  if (!EMAIL_RE.test(email)) return json(res, 400, { error: "Add a valid email so they can reach you." });
+  if (message.length < 5) return json(res, 400, { error: "Tell them what you want to buy." });
+  if (email === seller.email) return json(res, 400, { error: "That's your own profile." });
+  const now = Date.now();
+  // el mismo comprador no repite al mismo vendedor en 24 h
+  if (recentBuyFrom.get(seller.id, email, now - DAY)) return json(res, 200, { ok: true, duplicate: true });
+  const firstNew = buyNewQ.get(seller.id).n === 0;
+  persistWithEmail(() => {
+    insertBuy.run(randomUUID(), seller.id, name, email, company, phone, message, ip, now);
+    // un aviso por racha sin revisar, dejando libre al menos un envío del día para su enlace de acceso
+    if (firstNew && loginLoad(seller.email) < (EMAIL_CONFIG?.maxPerRecipientPerDay ?? 3) - 1) EMAIL.enqueue("buy", { id: randomUUID(), email: seller.email });
+  });
+  scheduleBackup();
+  broadcast({ type: "buy", id: seller.id });
+  json(res, 201, { ok: true });
+}
+function buyList(res, builder) {
+  const rows = buyListQ.all(builder.id);
+  if (markBuysSeen.run(Date.now(), builder.id).changes) scheduleBackup();
+  json(res, 200, { ok: true, requests: rows.map(r => ({ id: r.id, name: r.name, email: r.email, company: r.company || "", phone: r.phone || "",
+    message: r.message, ts: r.created_at, isNew: !r.seen_at })), last30: buyCountQ.get(builder.id, Date.now() - 30 * DAY).n });
+}
+
 const deleteBuilder = db.prepare("DELETE FROM builders WHERE id = ?");
 const deleteJobsOf = db.prepare("DELETE FROM jobs WHERE builder_id = ?");
 const deleteTokensOf = db.prepare("DELETE FROM member_tokens WHERE builder_id = ?");
 function removeProfile(res, builder) {
   if (openEscrowOf.get(builder.id))
     return json(res, 409, { error: "You have bounty money in escrow. Pick a winner or close the bounty and wait for the refund before removing your profile." });
-  persistWithEmail(() => { deleteMessagesOf.run(builder.id, builder.id); deleteBlocksOf.run(builder.id, builder.id); deleteJobsOf.run(builder.id); deleteBountiesOf.run(builder.id); deleteTokensOf.run(builder.id); deleteBuilder.run(builder.id); });
+  persistWithEmail(() => { deleteBuysOf.run(builder.id); deleteMessagesOf.run(builder.id, builder.id); deleteBlocksOf.run(builder.id, builder.id); deleteJobsOf.run(builder.id); deleteBountiesOf.run(builder.id); deleteTokensOf.run(builder.id); deleteBuilder.run(builder.id); });
   if (builder.avatar) STORAGE?.remove(builder.avatar).catch(() => {});
   if (builder.brochure) STORAGE?.remove(builder.brochure).catch(() => {});
   scheduleBackup();
@@ -1051,6 +1117,8 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { entries: rows.map(publicView), count: directoryCountQ.get(f).n });
     }
     if (pathname === "/api/register" && req.method === "POST") return await register(req, res);
+    const buy = /^\/api\/buy\/([0-9a-f-]{36})$/.exec(pathname);
+    if (buy && req.method === "POST") return await buyRequest(req, res, buy[1]);
     if (pathname === "/api/search" && req.method === "GET") {
       if (limited("search:" + clientIp(req), 60)) return json(res, 429, { error: "Too many searches, please wait a minute." });
       return search(res, new URL(req.url, "http://x").searchParams.get("q") || "");
@@ -1084,6 +1152,8 @@ const server = createServer(async (req, res) => {
       if (pathname === "/api/me" && req.method === "DELETE") return removeProfile(res, builder);
       if (pathname === "/api/me/avatar" && req.method === "POST") return await uploadAvatar(req, res, builder);
       if (pathname === "/api/me/avatar" && req.method === "DELETE") return removeAvatar(res, builder);
+      if (pathname === "/api/me/buy" && req.method === "POST") return await saveBuy(req, res, builder);
+      if (pathname === "/api/me/buyers" && req.method === "GET") return buyList(res, builder);
       if (pathname === "/api/me/password" && req.method === "POST") return await savePassword(req, res, builder);
       if (pathname === "/api/me/unread" && req.method === "GET") return json(res, 200, { ok: true, unread: unreadQ.get(builder.id).n });
       if (pathname === "/api/me/inbox" && req.method === "GET") return inbox(res, builder);
