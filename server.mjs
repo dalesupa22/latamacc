@@ -336,7 +336,10 @@ async function register(req, res) {
   const pub = publicView({ ...row, n: numberQ.get(row.id).n });
   broadcast({ type: "join", builder: pub, total: totalQ.get().n });
   scheduleBackup();
-  json(res, 201, { ok: true, builder: pub });
+  // quien se acaba de registrar queda adentro de su perfil nuevo (solo ese); para volver luego fija una contraseña
+  const session = newToken();
+  insertToken.run(tokenHash(session), row.id, "session", row.created_at, row.created_at + SESSION_TTL);
+  json(res, 201, { ok: true, builder: pub, session, me: me(byId.get(row.id)) });
 }
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -362,6 +365,7 @@ function parseProfile(b) {
 
 // ---------- miembros: enlace por correo, sesión, edición del perfil y foto/logo ----------
 const HOUR = 3600_000, DAY = 24 * HOUR;
+const SESSION_TTL = 90 * DAY;
 const tokenHash = t => createHash("sha256").update(String(t)).digest("hex");
 const newToken = () => randomBytes(32).toString("base64url");
 const insertToken = db.prepare("INSERT INTO member_tokens (hash,builder_id,kind,created_at,expires_at) VALUES (?,?,?,?,?)");
@@ -457,7 +461,7 @@ async function passwordSignin(req, res) {
   const ok = await passwordOk(pw, found?.password_hash || DUMMY_HASH) && !!found?.password_hash;
   if (!ok) return json(res, 401, { error: "Wrong email or password. Never set a password? Use the email link below, then set one in your profile." });
   const builder = byId.get(found.id), session = newToken(), now = Date.now();
-  insertToken.run(tokenHash(session), builder.id, "session", now, now + 30 * DAY);
+  insertToken.run(tokenHash(session), builder.id, "session", now, now + SESSION_TTL);
   json(res, 200, { ok: true, session, me: me(builder) });
 }
 
@@ -471,7 +475,7 @@ async function startSession(req, res) {
   const builder = byId.get(link.builder_id);
   if (!builder) return json(res, 401, { error: "This profile no longer exists." });
   const session = newToken(), now = Date.now();
-  insertToken.run(tokenHash(session), builder.id, "session", now, now + 30 * DAY);
+  insertToken.run(tokenHash(session), builder.id, "session", now, now + SESSION_TTL);
   json(res, 200, { ok: true, session, me: me(builder) });
 }
 

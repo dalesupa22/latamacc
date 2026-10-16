@@ -539,3 +539,4 @@ html:has(.me[open]) { overflow: hidden; }
 .buyers .why { color: var(--fg); font-size: 14px; white-space: pre-wrap; display: block; -webkit-line-clamp: unset; }
 .buyers .card-actions { justify-content: flex-start; }
 .buyers .card-actions a.btn.primary, .card-btns .btn.primary[data-buy] { color: #1a1204; }
+.me .linkform { margin-top: 10px; }

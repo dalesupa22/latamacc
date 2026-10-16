@@ -36,7 +36,7 @@
         <a class="hide-sm" href="#bounties">Bounties</a>
         <a class="hide-sm" href="#jobs">Jobs</a>
         <button class="navlink nav-inbox" type="button" data-me="messages" hidden aria-label="Messages">✉ <b class="unread-n"></b></button>
-        <button class="navlink hide-sm" type="button" data-me="profile">Edit profile</button>
+        <button class="navlink hide-sm" type="button" data-me="profile" id="nav-me">Sign in</button>
         <a class="pill" href="#join">Join the directory</a>
       </div>
     </div>
@@ -126,7 +126,7 @@
           <span class="mono">MEMBER</span>
           <b id="done-n">#1</b>
           <h3 id="done-title">You're on the map</h3>
-          <p>Your light is on for everyone. Now bring your people: share it.</p>
+          <p>Your light is on for everyone. You're signed in: set a password, add your photo, your offer and your 🛒 Buy button. Then bring your people.</p>
           <div class="invite-box">
             <span class="mono">Your invite link</span>
             <div class="invite-row"><input id="done-link" readonly aria-label="Your invite link" /><button class="btn small" type="button" data-copy="#done-link">Copy</button></div>
@@ -134,7 +134,7 @@
           </div>
           <div class="cta">
             <a id="done-share" class="btn primary" target="_blank" rel="noopener">Share on 𝕏</a>
-            <button class="btn" type="button" data-me="profile">Edit profile</button>
+            <button class="btn" type="button" data-me="profile">Set up my profile</button>
             <button id="done-again" class="btn" type="button">Add someone else</button>
           </div>
         </div>
@@ -391,7 +391,7 @@
     <div id="me-signin">
       <p class="kicker mono">Members</p>
       <h3 id="me-title">Sign in</h3>
-      <p class="me-lead">Sign in with your email and password. First time here? Use the email link, then set a password in your profile.</p>
+      <p class="me-lead">Use your email and password. No password yet? Leave it empty and tap “Email me a sign-in link”, then set one in your profile.</p>
       <form id="pwsignin" class="form" novalidate>
         <label>Email<input name="email" type="email" required maxlength="120" autocomplete="username" placeholder="ana@startup.ai" /></label>
         <label>Password<input name="password" type="password" required maxlength="200" autocomplete="current-password" /></label>
@@ -399,12 +399,11 @@
         <button class="btn primary big" type="submit">Sign in</button>
         <p class="form-msg" role="status"></p>
       </form>
-      <div class="or mono"><span>or get a one-time link by email</span></div>
-      <form id="signin" class="form" novalidate>
-        <label>Email<input name="email" type="email" required maxlength="120" autocomplete="email" placeholder="ana@startup.ai" /></label>
+      <form id="signin" class="form linkform" novalidate>
+        <input name="email" type="hidden" />
         <input name="hp_field" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
         <div class="ts" data-form="signin"></div>
-        <button class="btn big" type="submit">Email me a sign-in link</button>
+        <button class="btn big" type="submit">✉ Email me a sign-in link</button>
         <p class="form-msg" role="status"></p>
       </form>
       <p class="fine">Not in the directory yet? <a href="#join" data-close>Join first</a>, it takes 30 seconds.</p>
@@ -422,7 +421,7 @@
         <label><input type="radio" name="metab" value="profile" checked /> <span>Profile</span></label>
         <label><input type="radio" name="metab" value="network" /> <span>Network</span></label>
         <label><input type="radio" name="metab" value="messages" /> <span>Messages <b class="unread-n"></b></span></label>
-        <label><input type="radio" name="metab" value="buyers" /> <span>Buyers <b class="buy-n unread-n"></b></span></label>
+        <label><input type="radio" name="metab" value="buyers" /> <span>Orders <b class="buy-n unread-n"></b></span></label>
         <label><input type="radio" name="metab" value="bounties" /> <span>Bounties</span></label>
         <label><input type="radio" name="metab" value="jobs" /> <span>Jobs</span></label>
       </div>

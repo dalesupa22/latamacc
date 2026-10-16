@@ -496,7 +496,7 @@ function connect() {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type === "hello" || m.type === "presence") { setOnline(m.online); S.watching = m.watching || {}; }
     else if (m.type === "join") onJoin(m.builder, m.total);
-    else if (m.type === "buy") { refreshState(); if (m.id === member.me?.id) { api("/api/me").catch(() => {}); toast("🛒 New buy request! Open Edit profile → Buyers."); } }
+    else if (m.type === "buy") { refreshState(); if (m.id === member.me?.id) { api("/api/me").catch(() => {}); toast("🛒 New buy request! Open My profile → Orders."); } }
     else if (m.type === "update" || m.type === "remove") { refreshState(); loadDir(); if (m.type === "remove") { loadJobs(); loadBounties(); } }
     else if (m.type === "jobs") { loadJobs(); patchEntry(m.builder); }
     else if (m.type === "bounties") loadBounties();
@@ -822,6 +822,7 @@ form.addEventListener("submit", async e => {
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || "Could not register.");
     showDone(j.builder, j.existing);
+    if (j.session) { saveSession(j.session); member.me = j.me; rememberEmail(j.me.email); renderMe(); }
     if (j.existing) { if (j.canEdit) toast("Already in the directory. Use Edit profile to change it."); return; }
     form.reset(); syncKind(); syncAlso(); $("#also").open = false;
     if (inviteRef) { inviteRef = ""; $("#invite-note").hidden = true; try { localStorage.removeItem(REF_KEY); } catch {} }
@@ -963,7 +964,7 @@ document.querySelectorAll('input[name="jwork"]').forEach(r => r.addEventListener
 const dlg = $("#me"), pform = $("#pform"), jform = $("#jform"), nform = $("#nform"), signin = $("#signin");
 const member = { session: "", me: null, editing: true, uploads: true };
 try { member.session = localStorage.getItem("latamacc-session") || ""; } catch {}
-function saveSession(v) { member.session = v; try { v ? localStorage.setItem("latamacc-session", v) : localStorage.removeItem("latamacc-session"); } catch {} }
+function saveSession(v) { member.session = v; navLabel(); try { v ? localStorage.setItem("latamacc-session", v) : localStorage.removeItem("latamacc-session"); } catch {} }
 async function api(path, opts = {}) {
   const r = await fetch(path, { ...opts, headers: { authorization: `Bearer ${member.session}`, ...(opts.json ? { "content-type": "application/json" } : {}), ...opts.headers },
     body: opts.json ? JSON.stringify(opts.json) : opts.body });
@@ -981,8 +982,10 @@ function setTab(tab) {
   dlg.querySelector(`input[name="metab"][value="${tab}"]`).checked = true;
   if (tab === "network" && (member.me?.offer || member.me?.seeking) && !$("#matches").children.length) runMatches();
 }
+function navLabel() { const el = $("#nav-me"); if (el) el.textContent = member.session && member.me ? "My profile" : "Sign in"; }
 function showMe(tab) {
   const signed = !!(member.session && member.me);
+  navLabel();
   $("#me-signin").hidden = signed; $("#me-main").hidden = !signed;
   if (signed && tab) setTab(tab);
 }
@@ -1019,7 +1022,7 @@ function renderMe() {
   $("#photo-remove").hidden = !m.avatar;
   $("#photo-file").disabled = !member.uploads;
   $("#me-profile .photo").hidden = !member.uploads && !m.avatar;
-  setUnread(m.unread || 0);
+  setUnread(m.unread || 0); navLabel();
   buyform.buy.value = m.buy || "";
   document.querySelectorAll(".buy-n").forEach(el => { el.textContent = m.buyNew ? String(m.buyNew) : ""; });
   pwform.username.value = m.email;
@@ -1049,8 +1052,10 @@ function formMsg(f, text, ok = false) {
 }
 signin.addEventListener("submit", async e => {
   e.preventDefault();
+  signin.email.value = pwsignin.email.value.trim();
   const btn = signin.querySelector("button[type=submit]"), data = Object.fromEntries(new FormData(signin));
-  if (!data.email.includes("@")) return formMsg(signin, "Add the email you joined with.");
+  if (!data.email.includes("@")) { pwsignin.email.focus(); return formMsg(signin, "Add the email you joined with above."); }
+  rememberEmail(data.email);
   btn.disabled = true;
   try {
     const r = await fetch("/api/signin/link", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(guarded(data, "signin")) });
@@ -1066,7 +1071,9 @@ const pwsignin = $("#pwsignin");
 pwsignin.addEventListener("submit", async e => {
   e.preventDefault();
   const btn = pwsignin.querySelector("button[type=submit]"), data = Object.fromEntries(new FormData(pwsignin));
-  if (!data.email.includes("@") || !data.password) return formMsg(pwsignin, "Add your email and password.");
+  if (!data.email.includes("@")) return formMsg(pwsignin, "Add your email and password.");
+  if (!data.password) return formMsg(pwsignin, "No password yet? Tap “Email me a sign-in link” below.");
+  rememberEmail(data.email.trim());
   btn.disabled = true;
   try {
     const r = await fetch("/api/signin/password", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(guarded(data, "pwsignin")) });
@@ -1077,8 +1084,9 @@ pwsignin.addEventListener("submit", async e => {
   } catch (err) { formMsg(pwsignin, err.message); }
   finally { btn.disabled = false; }
 });
-// el correo escrito en un formulario se copia al otro
-pwsignin.email.addEventListener("input", () => { signin.email.value = pwsignin.email.value; });
+// se recuerda el último correo usado en este navegador para no tener que escribirlo otra vez
+function rememberEmail(v) { try { localStorage.setItem("latamacc-email", v); } catch {} }
+try { pwsignin.email.value = localStorage.getItem("latamacc-email") || ""; } catch {}
 const pwform = $("#pwform");
 pwform.addEventListener("submit", async e => {
   e.preventDefault();
