@@ -40,7 +40,7 @@ const cols = new Set(db.prepare("PRAGMA table_info(builders)").all().map(c => c.
 // avatar: clave en S3 de la foto o logo; updated_at: última edición del perfil.
 // offer/seeking: qué ofrece y qué o a quién busca (agente de networking); brochure: clave en S3 de su PDF.
 for (const [col, def] of [["kind", "TEXT NOT NULL DEFAULT 'person'"], ["company", "TEXT"], ["website", "TEXT"], ["also", "TEXT NOT NULL DEFAULT '[]'"],
-  ["avatar", "TEXT"], ["updated_at", "INTEGER"], ["referred_by", "TEXT"], ["calls", "TEXT"], ["offer", "TEXT"], ["seeking", "TEXT"], ["brochure", "TEXT"], ["password_hash", "TEXT"], ["buy", "TEXT"]])
+  ["avatar", "TEXT"], ["updated_at", "INTEGER"], ["referred_by", "TEXT"], ["calls", "TEXT"], ["offer", "TEXT"], ["seeking", "TEXT"], ["brochure", "TEXT"], ["password_hash", "TEXT"], ["buy", "TEXT"], ["shipped", "TEXT"], ["shipped_at", "INTEGER"]])
   if (!cols.has(col)) db.exec(`ALTER TABLE builders ADD COLUMN ${col} ${def}`);
 // Empleos publicados por miembros; vencen a los 60 días o cuando su autor los cierra.
 db.exec(`CREATE TABLE IF NOT EXISTS jobs (
@@ -91,13 +91,13 @@ const insert = db.prepare(`INSERT INTO builders (id,kind,name,company,email,coun
 const directoryQ = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders
   WHERE (:country = '' OR country = :country OR EXISTS (SELECT 1 FROM json_each(builders.also) j WHERE j.value = :country))
     AND (:kind = '' OR kind = :kind)
-    AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like OR offer LIKE :like OR seeking LIKE :like)
+    AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like OR offer LIKE :like OR seeking LIKE :like OR shipped LIKE :like)
     AND (:calls = 0 OR COALESCE(calls, '') <> '')
   ORDER BY created_at DESC LIMIT 60 OFFSET :offset`);
 const directoryCountQ = db.prepare(`SELECT COUNT(*) n FROM builders
   WHERE (:country = '' OR country = :country OR EXISTS (SELECT 1 FROM json_each(builders.also) j WHERE j.value = :country))
     AND (:kind = '' OR kind = :kind)
-    AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like OR offer LIKE :like OR seeking LIKE :like)
+    AND (:q = '' OR name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like OR offer LIKE :like OR seeking LIKE :like OR shipped LIKE :like)
     AND (:calls = 0 OR COALESCE(calls, '') <> '')`);
 const byEmail = db.prepare(`SELECT rowid AS n, * FROM builders WHERE email = ?`);
 const byId = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders WHERE id = ?`);
@@ -224,6 +224,7 @@ function publicView(r) {
     also: alsoOf(r), building: r.building || "", website: r.website || "", handle: r.handle || "", ts: r.created_at,
     avatar: r.avatar ? `/media/${r.avatar}` : "", hiring: r.hiring || 0, calls: r.calls || "",
     offer: r.offer || "", seeking: r.seeking || "", brochure: r.brochure ? `/media/${r.brochure}` : "", buy: r.buy || "",
+    shipped: r.shipped || "", shippedAt: r.shipped_at || null,
     ref: refOf(r.id), invitedBy: by ? { id: by.id, name: by.name, n: by.n } : null, invited: invitedCountQ.get(r.id).n };
 }
 // ---------- referidos: cada miembro invita con latamacc.si/?ref=<8 primeros caracteres de su id> ----------
@@ -592,7 +593,7 @@ function networkMatches(res, builder) {
 
 // ---------- búsqueda global: personas y empresas, bounties y empleos ----------
 const searchPeopleQ = db.prepare(`SELECT rowid AS n, *, ${HIRING} FROM builders
-  WHERE name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like OR offer LIKE :like OR seeking LIKE :like OR handle LIKE :like
+  WHERE name LIKE :like OR company LIKE :like OR building LIKE :like OR city LIKE :like OR offer LIKE :like OR seeking LIKE :like OR handle LIKE :like OR shipped LIKE :like
   ORDER BY (name LIKE :like OR company LIKE :like) DESC, created_at DESC LIMIT 8`);
 function search(res, q) {
   q = clean(q, 60);
@@ -665,6 +666,21 @@ function setBlock(res, builder, otherId, on) {
   on ? addBlock.run(builder.id, otherId, Date.now()) : dropBlock.run(builder.id, otherId);
   scheduleBackup();
   json(res, 200, { ok: true, blocked: on });
+}
+
+// ---------- "¿Qué lanzaste en las últimas dos semanas?": se pregunta al entrar y queda en el perfil público ----------
+const setShipped = db.prepare("UPDATE builders SET shipped = ?, shipped_at = ?, updated_at = ? WHERE id = ?");
+async function saveShipped(req, res, builder) {
+  if (limited("edit:" + builder.id, 30)) return json(res, 429, { error: "Too many changes, please wait a minute." });
+  let b;
+  try { b = await readBody(req); } catch { return json(res, 400, { error: "Invalid request." }); }
+  const text = clean(b.shipped, 280), now = Date.now();
+  if (text.length < 3) return json(res, 400, { error: "Tell us what you shipped (a few words is fine)." });
+  setShipped.run(text, now, now, builder.id);
+  scheduleBackup();
+  const row = byId.get(builder.id);
+  broadcast({ type: "update", builder: publicView(row) });
+  json(res, 200, { ok: true, me: me(row) });
 }
 
 // ---------- botón "Buy": compradores dejan sus datos y el vendedor recibe un aviso ----------
@@ -1156,6 +1172,7 @@ const server = createServer(async (req, res) => {
       if (pathname === "/api/me" && req.method === "DELETE") return removeProfile(res, builder);
       if (pathname === "/api/me/avatar" && req.method === "POST") return await uploadAvatar(req, res, builder);
       if (pathname === "/api/me/avatar" && req.method === "DELETE") return removeAvatar(res, builder);
+      if (pathname === "/api/me/shipped" && req.method === "POST") return await saveShipped(req, res, builder);
       if (pathname === "/api/me/buy" && req.method === "POST") return await saveBuy(req, res, builder);
       if (pathname === "/api/me/buyers" && req.method === "GET") return buyList(res, builder);
       if (pathname === "/api/me/password" && req.method === "POST") return await savePassword(req, res, builder);

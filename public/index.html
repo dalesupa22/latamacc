@@ -364,6 +364,19 @@
     <div id="s-results" aria-live="polite"></div>
   </dialog>
 
+  <dialog id="shipdlg" class="me" aria-labelledby="ship-title">
+    <button class="cp-close" type="button" id="ship-close" aria-label="Close">×</button>
+    <p class="kicker mono">🚀 Builders ship</p>
+    <h3 id="ship-title">What did you ship in the last two weeks?</h3>
+    <p class="me-lead">A feature, a launch, a client, a demo, a post. It shows on your public profile so the community sees you're building.</p>
+    <form id="shipform" class="form" novalidate>
+      <textarea name="shipped" maxlength="280" rows="3" required placeholder="Launched our AI agent for bank onboarding with 2 pilots in Bogotá"></textarea>
+      <button class="btn primary big" type="submit">Post to my profile</button>
+      <button class="linkish" type="button" id="ship-later">Ask me later</button>
+      <p class="form-msg" role="status"></p>
+    </form>
+  </dialog>
+
   <dialog id="buydlg" class="me" aria-labelledby="buy-title">
     <button class="cp-close" type="button" id="buy-close" aria-label="Close">×</button>
     <p class="kicker mono">🛒 Buy</p>
@@ -426,6 +439,7 @@
         <label><input type="radio" name="metab" value="jobs" /> <span>Jobs</span></label>
       </div>
       <div id="me-profile">
+        <button class="btn small ship-btn" type="button" id="ship-open">🚀 What did you ship lately?</button>
         <form id="pwform" class="form pwform" novalidate>
           <b class="form-title" id="pw-title">Set a password</b>
           <span class="fine" id="pw-state">Sign in next time with your email and password, no email link needed.</span>

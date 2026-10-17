@@ -540,3 +540,8 @@ html:has(.me[open]) { overflow: hidden; }
 .buyers .card-actions { justify-content: flex-start; }
 .buyers .card-actions a.btn.primary, .card-btns .btn.primary[data-buy] { color: #1a1204; }
 .me .linkform { margin-top: 10px; }
+
+/* qué lanzaste */
+.net-line.shipped span { color: var(--fire2); }
+#shipform .linkish { justify-self: center; font-size: 13px; color: var(--mute); }
+.ship-btn { margin-top: 18px; }

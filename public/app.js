@@ -722,6 +722,7 @@ function renderDir() {
       ${b.also?.length ? `<span class="also-flags">Also in ${b.also.map(flag).join(" ")}</span>` : ""}
       ${networkLines(b)}
       ${invitedLine(b)}
+      ${shippedLine(b)}
       ${b.buy ? `<p class="net-line"><span>Sells</span>${esc(b.buy)}</p>` : ""}
       <div class="card-btns">${buyButton(b)}${dmButton(b)}${callLink(b)}${brochureLink(b)}</div>
       <div class="card-foot"><span>${esc([b.city, cname(b.country)].filter(Boolean).join(", "))}</span>
@@ -838,6 +839,8 @@ form.addEventListener("submit", async e => {
 });
 
 const callLink = b => safeUrl(b.calls) ? `<a class="btn small primary call" href="${esc(safeUrl(b.calls))}" target="_blank" rel="noopener nofollow">📞 Book a call</a>` : "";
+const shipDay = ts => new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const shippedLine = b => b.shipped ? `<p class="net-line shipped"><span>🚀 Shipped · ${esc(shipDay(b.shippedAt))}</span>${esc(b.shipped)}</p>` : "";
 const buyButton = b => b.buy && member.me?.id !== b.id ? `<button class="btn small primary" type="button" data-buy="${esc(b.id)}" data-buyname="${esc(b.name)}" data-buywhat="${esc(b.buy)}">🛒 Buy</button>` : "";
 const dmButton = b => member.me?.id === b.id ? "" : `<button class="btn small" type="button" data-dm="${esc(b.id)}">✉ Message</button>`;
 const brochureUrl = u => /^\/media\/brochures\/[0-9a-f/-]+\.pdf$/.test(u || "") ? u : "";
@@ -1080,6 +1083,7 @@ pwsignin.addEventListener("submit", async e => {
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || "Could not sign in.");
     saveSession(j.session); member.me = j.me; pwsignin.reset(); renderMe(); showMe("profile"); loadDir();
+    setTimeout(maybeAskShipped, 600);
     toast(`Welcome back, ${j.me.name} ✦`);
   } catch (err) { formMsg(pwsignin, err.message); }
   finally { btn.disabled = false; }
@@ -1267,7 +1271,7 @@ async function pollUnread() {
     if (!r.ok) return;
     const { unread } = await r.json();
     const prev = member.me?.unread || 0;
-    if (!member.me) { try { await api("/api/me"); } catch { return; } }
+    if (!member.me) { try { await api("/api/me"); } catch { return; } setTimeout(maybeAskShipped, 2500); }
     setUnread(unread);
     if (unread > prev) {
       if (dlg.open && dms.with && !$("#me-messages").hidden) openThread(dms.with.id);
@@ -1278,6 +1282,33 @@ async function pollUnread() {
 }
 setInterval(pollUnread, 30_000);
 setTimeout(pollUnread, 1500);
+
+// ---------- "¿Qué lanzaste?": se pregunta al entrar si no ha contado nada en 14 días ----------
+const shipdlg = $("#shipdlg"), shipform = $("#shipform");
+const SHIP_EVERY = 14 * 86400_000, SHIP_SNOOZE = 3 * 86400_000;
+function maybeAskShipped() {
+  const m = member.me;
+  if (!m || shipdlg.open) return;
+  if (m.shippedAt && Date.now() - m.shippedAt < SHIP_EVERY) return;
+  let snoozed = 0; try { snoozed = Number(localStorage.getItem("latamacc-ship-snooze:" + m.id)) || 0; } catch {}
+  if (Date.now() - snoozed < SHIP_SNOOZE) return;
+  shipform.shipped.value = ""; shipform.querySelector(".form-msg").textContent = "";
+  shipdlg.showModal();
+}
+function snoozeShip() { try { localStorage.setItem("latamacc-ship-snooze:" + member.me?.id, String(Date.now())); } catch {} shipdlg.close(); }
+$("#ship-close").addEventListener("click", snoozeShip);
+$("#ship-later").addEventListener("click", snoozeShip);
+$("#ship-open").addEventListener("click", () => { shipform.shipped.value = member.me?.shipped || ""; shipform.querySelector(".form-msg").textContent = ""; shipdlg.showModal(); });
+shipdlg.addEventListener("cancel", e => { e.preventDefault(); snoozeShip(); });
+shipform.addEventListener("submit", async e => {
+  e.preventDefault();
+  const btn = shipform.querySelector("button[type=submit]"); btn.disabled = true;
+  try {
+    await api("/api/me/shipped", { method: "POST", json: { shipped: shipform.shipped.value } });
+    shipdlg.close(); toast("🚀 Posted to your profile. Keep shipping!"); loadDir();
+  } catch (err) { formMsg(shipform, err.message); }
+  finally { btn.disabled = false; }
+});
 
 // ---------- botón "Buy" ----------
 const buydlg = $("#buydlg"), bbuy = $("#bbuy"), buyform = $("#buyform");
@@ -1469,6 +1500,7 @@ async function consumeSignin() {
     if (!r.ok) throw new Error(j.error || "Could not sign in.");
     saveSession(j.session); member.me = j.me; renderMe(); showMe("profile");
     toast("Signed in ✦ Edit your profile below.");
+    setTimeout(maybeAskShipped, 600);
   } catch (err) { showMe(); formMsg(signin, err.message); }
 }
 
